@@ -31,13 +31,15 @@ class CompanySalesScraper:
 
         self.chrome_options = webdriver.ChromeOptions()
         # ヘッドレスモードを有効にする場合はコメントを外してください
-        self.chrome_options.add_argument('--headless')
+        self.chrome_options.add_argument('--headless=new')
         self.chrome_options.add_argument('--no-sandbox')
         self.chrome_options.add_argument('--disable-dev-shm-usage')
+        self.chrome_options.add_argument('--disable-gpu')
+        self.chrome_options.add_argument('--window-size=1920,1080')
         self.chrome_options.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/115.0.0.0 Safari/537.36"
+            "Chrome/135.0.0.0 Safari/537.36"
         )
 
         if not os.path.exists(self.output_file):
@@ -70,6 +72,9 @@ class CompanySalesScraper:
         try:
             with webdriver.Chrome(options=self.chrome_options) as driver, \
                  open(self.input_file, 'r', encoding='utf-8') as f_in:
+                # Set page load timeout
+                driver.set_page_load_timeout(30)
+                driver.implicitly_wait(10)
 
                 reader = csv.reader(f_in)
                 header = next(reader, None)  # ヘッダーをスキップ
