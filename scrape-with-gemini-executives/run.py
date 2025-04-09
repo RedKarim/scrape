@@ -42,7 +42,7 @@ class CompanySalesScraper:
 
         # 出力ファイルを初期化
         self.clear_output_file()
-        
+
         self.chrome_options = webdriver.ChromeOptions()
         # ヘッドレスモードを有効にする場合はコメントを外してください
         # self.chrome_options.add_argument('--headless=new')  # Commented out headless mode
@@ -554,7 +554,7 @@ class CompanySalesScraper:
             else:
                 # 全体のテキストを取得
                 extracted_text = soup.get_text()
-            
+                
             # テキストの整形
             # 余分な空白を削除
             extracted_text = re.sub(r'\s+', ' ', extracted_text)
