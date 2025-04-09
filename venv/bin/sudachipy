@@ -1,4 +1,4 @@
-#!/Users/redkarim/Desktop/WPcodebases/ec2-user/venv/bin/python
+#!/Users/redkarim/Desktop/WPcodebases/ec2-user/venv/bin/python3.11
 # -*- coding: utf-8 -*-
 import re
 import sys
