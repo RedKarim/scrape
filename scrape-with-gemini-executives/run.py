@@ -2,6 +2,7 @@ import csv
 import time
 import random
 import os
+import glob
 from urllib.parse import quote_plus
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -139,6 +140,9 @@ class CompanySalesScraper:
             logging.critical(f"スクレイピングが予期せず終了しました: {str(e)}")
             print(f"エラーが発生しました: {str(e)}")
         finally:
+            # スクリーンショットファイルを削除
+            self.cleanup_screenshots()
+            
             logging.info("スクレイピングプロセスが完了しました。")
             print(f"\nスクレイピングが完了しました。結果は {os.path.abspath(self.output_file)} に保存されています。")
         
@@ -539,6 +543,25 @@ class CompanySalesScraper:
         except Exception as e:
             self.logger.error(f"ファイル書き込み中にエラーが発生: {str(e)}")
             print(f"ファイル書き込みエラー: {str(e)}")
+
+    def cleanup_screenshots(self):
+        """スクリーンショットファイルを削除する"""
+        try:
+            # スクリーンショットファイルのパターンにマッチするファイルを検索
+            screenshot_files = glob.glob("screenshot_*.png")
+            if screenshot_files:
+                for file in screenshot_files:
+                    try:
+                        os.remove(file)
+                        self.logger.debug(f"Screenshot removed: {file}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to remove screenshot {file}: {str(e)}")
+                
+                self.logger.info(f"Removed {len(screenshot_files)} screenshot files")
+                print(f"{len(screenshot_files)}件のスクリーンショットファイルを削除しました。")
+        except Exception as e:
+            self.logger.error(f"Error during screenshot cleanup: {str(e)}")
+            print(f"スクリーンショット削除中にエラーが発生しました: {str(e)}")
 
 
 if __name__ == "__main__":
