@@ -128,6 +128,11 @@ class CompanySalesScraper:
                                 else:
                                     # 単一役員
                                     self.write_company_data([company_data])
+                        else:
+                            # データが取得できなかった場合も出力に含める
+                            self.write_company_data([[company_name, "取得失敗", "情報取得失敗", "情報なし"]])
+                            self.logger.warning(f"{company_name}の情報が取得できませんでした")
+                            
                         # ランダムな遅延（5〜10秒）
                         time.sleep(random.uniform(4, 8))
         except Exception as e:
@@ -164,305 +169,188 @@ class CompanySalesScraper:
                 self.logger.error(f"Failed to access Google search page: {str(e)}")
                 return [company_name, "取得失敗", f"エラー: 検索ページへのアクセスに失敗: {str(e)}", "エラー"]
 
-            # 特定の企業名に応じた特別処理
+            # 初期化
             company_url = None
             executives_data = []
             
-            # ドトールの場合は役員一覧ページに直接アクセス
-            if "ドトール" in company_name:
-                try:
-                    direct_url = "https://www.doutor.co.jp/corporate/officer/"
-                    self.logger.debug(f"ドトールを検出: 直接URLにアクセス: {direct_url}")
-                    driver.get(direct_url)
-                    time.sleep(2)
-                    company_url = direct_url
-                    
-                    # 全ページコンテンツを取得
-                    page_content = self.extract_cleaned_content(driver, direct_url)
-                    
-                    # LLMを使用して役員情報を抽出
-                    executives_json = self.query(page_content)
-                    self.logger.debug(f"LLM Response: {executives_json}")
-                    
-                    # JSON解析
-                    try:
-                        import json
-                        executives_data_json = json.loads(executives_json)
-                        if "executives" in executives_data_json and executives_data_json["executives"]:
-                            for executive in executives_data_json["executives"]:
-                                position = executive.get("役職", "")
-                                name = executive.get("氏名", "")
-                                if name and name != "":
-                                    # 結果を追加
-                                    executives_data.append([company_name, company_url, position, name.strip()])
-                                    self.logger.debug(f"抽出された役員情報: {position} - {name}")
-                            
-                            if executives_data:
-                                return executives_data  # 複数役員を返す
-                    except json.JSONDecodeError as e:
-                        self.logger.error(f"JSON解析エラー: {str(e)}")
-                    
-                    # JSONから抽出できなかった場合、従来のメソッドを試す
-                    if not executives_data:
-                        try:
-                            # ドトール向けの特別抽出
-                            content_element = driver.find_element(By.CSS_SELECTOR, "div.c-main")
-                            if content_element:
-                                content_text = content_element.text
-                                # 役員名と役職のペアを抽出する正規表現
-                                pattern = r"(代表取締役(?:社長|会長)|取締役)\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})"
-                                matches = re.findall(pattern, content_text)
-                                
-                                if matches and len(matches) > 0:
-                                    # 役員情報を保存
-                                    for role, name in matches:
-                                        executives_data.append([company_name, company_url, role, name.strip()])
-                                        self.logger.debug(f"抽出された役員情報(正規表現): {role} - {name}")
-                                    
-                                    if executives_data:
-                                        return executives_data  # 複数役員を返す
-                        except Exception as e:
-                            self.logger.debug(f"特別処理中にエラー: {str(e)}")
-                except Exception as e:
-                    self.logger.debug(f"直接URLアクセス中にエラー: {str(e)}")
-            
-            # ファーストリテイリングの場合は直接役員ページにアクセス
-            elif "ファーストリテイリング" in company_name:
-                try:
-                    direct_url = "https://www.fastretailing.com/jp/about/company/officers.html"
-                    self.logger.debug(f"ファーストリテイリングを検出: 直接URLにアクセス: {direct_url}")
-                    driver.get(direct_url)
-                    time.sleep(2)
-                    company_url = direct_url
-                    
-                    # 全ページコンテンツを取得
-                    page_content = self.extract_cleaned_content(driver, direct_url)
-                    
-                    # LLMを使用して役員情報を抽出
-                    executives_json = self.query(page_content)
-                    self.logger.debug(f"LLM Response: {executives_json}")
-                    
-                    # JSON解析
-                    try:
-                        import json
-                        executives_data_json = json.loads(executives_json)
-                        if "executives" in executives_data_json and executives_data_json["executives"]:
-                            for executive in executives_data_json["executives"]:
-                                position = executive.get("役職", "")
-                                name = executive.get("氏名", "")
-                                if name and name != "":
-                                    # 結果を追加
-                                    executives_data.append([company_name, company_url, position, name.strip()])
-                                    self.logger.debug(f"抽出された役員情報: {position} - {name}")
-                            
-                            if executives_data:
-                                return executives_data  # 複数役員を返す
-                    except json.JSONDecodeError as e:
-                        self.logger.error(f"JSON解析エラー: {str(e)}")
-                    
-                    # JSONから抽出できなかった場合、従来のメソッドを試す
-                    if not executives_data:
-                        try:
-                            # ファーストリテイリング向けの特別抽出
-                            content_elements = driver.find_elements(By.CSS_SELECTOR, "dl.officers__list")
-                            if content_elements and len(content_elements) > 0:
-                                for element in content_elements:
-                                    officer_text = element.text
-                                    # 役職と名前を抽出
-                                    pattern = r"([^\n]+)\n([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})"
-                                    matches = re.findall(pattern, officer_text)
-                                    
-                                    if matches and len(matches) > 0:
-                                        for role, name in matches:
-                                            executives_data.append([company_name, company_url, role, name.strip()])
-                                            self.logger.debug(f"抽出された役員情報(正規表現): {role} - {name}")
-                                
-                                if executives_data:
-                                    return executives_data  # 複数役員を返す
-                        except Exception as e:
-                            self.logger.debug(f"ファーストリテイリング特別処理中にエラー: {str(e)}")
-                except Exception as e:
-                    self.logger.debug(f"直接URLアクセス中にエラー: {str(e)}")
-            
             # 検索結果からURLを取得
-            if not company_url:  # 特定企業の処理でURLが設定されていない場合
+            try:
+                self.logger.debug("Attempting to find search results...")
+                # 複数のセレクタを試す
+                selectors = [
+                    "div.g",  # 従来のセレクタ
+                    "div[data-sokoban-container]",  # 新しいセレクタ
+                    "div.tF2Cxc",  # 別の新しいセレクタ
+                    "div.yuRUbf"  # 別の新しいセレクタ
+                ]
+                
+                search_results = None
+                for selector in selectors:
+                    try:
+                        self.logger.debug(f"Trying selector: {selector}")
+                        search_results = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if search_results:
+                            self.logger.debug(f"Found search results using selector: {selector}")
+                            self.logger.debug(f"Number of results found: {len(search_results)}")
+                            break
+                    except Exception as e:
+                        self.logger.debug(f"Selector {selector} failed: {str(e)}")
+                        continue
+
+                if not search_results:
+                    self.logger.warning("No search results found with any selector")
+                    return [company_name, "取得失敗", "エラー: 検索結果が見つかりませんでした", "エラー"]
+
+                # 最初の検索結果のURLを取得
                 try:
-                    self.logger.debug("Attempting to find search results...")
-                    # 複数のセレクタを試す
-                    selectors = [
-                        "div.g",  # 従来のセレクタ
-                        "div[data-sokoban-container]",  # 新しいセレクタ
-                        "div.tF2Cxc",  # 別の新しいセレクタ
-                        "div.yuRUbf"  # 別の新しいセレクタ
-                    ]
+                    self.logger.debug("Attempting to get first search result...")
+                    first_result = search_results[0]
+                    self.logger.debug("Got first search result")
                     
-                    search_results = None
-                    for selector in selectors:
+                    # 複数のリンクセレクタを試す
+                    link_selectors = ["a", "a[href]", "a[jsname='UWckNb']"]
+                    link = None
+                    for link_selector in link_selectors:
                         try:
-                            self.logger.debug(f"Trying selector: {selector}")
-                            search_results = driver.find_elements(By.CSS_SELECTOR, selector)
-                            if search_results:
-                                self.logger.debug(f"Found search results using selector: {selector}")
-                                self.logger.debug(f"Number of results found: {len(search_results)}")
+                            self.logger.debug(f"Trying link selector: {link_selector}")
+                            link = first_result.find_element(By.CSS_SELECTOR, link_selector)
+                            if link:
+                                self.logger.debug(f"Found link using selector: {link_selector}")
                                 break
                         except Exception as e:
-                            self.logger.debug(f"Selector {selector} failed: {str(e)}")
+                            self.logger.debug(f"Link selector {link_selector} failed: {str(e)}")
                             continue
 
-                    if not search_results:
-                        self.logger.warning("No search results found with any selector")
-                        return [company_name, "取得失敗", "エラー: 検索結果が見つかりませんでした", "エラー"]
+                    if not link:
+                        self.logger.error("No link element found in search result")
+                        raise Exception("リンク要素が見つかりません")
 
-                    # 最初の検索結果のURLを取得
-                    try:
-                        self.logger.debug("Attempting to get first search result...")
-                        first_result = search_results[0]
-                        self.logger.debug("Got first search result")
-                        
-                        # 複数のリンクセレクタを試す
-                        link_selectors = ["a", "a[href]", "a[jsname='UWckNb']"]
-                        link = None
-                        for link_selector in link_selectors:
-                            try:
-                                self.logger.debug(f"Trying link selector: {link_selector}")
-                                link = first_result.find_element(By.CSS_SELECTOR, link_selector)
-                                if link:
-                                    self.logger.debug(f"Found link using selector: {link_selector}")
-                                    break
-                            except Exception as e:
-                                self.logger.debug(f"Link selector {link_selector} failed: {str(e)}")
-                                continue
+                    company_url = link.get_attribute("href")
+                    if not company_url:
+                        self.logger.error("No URL found in link element")
+                        raise Exception("URLが取得できません")
 
-                        if not link:
-                            self.logger.error("No link element found in search result")
-                            raise Exception("リンク要素が見つかりません")
-
-                        company_url = link.get_attribute("href")
-                        if not company_url:
-                            self.logger.error("No URL found in link element")
-                            raise Exception("URLが取得できません")
-
-                        self.logger.debug(f"Successfully extracted company URL: {company_url}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to extract company URL: {str(e)}")
-                        return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー"]
-
-                    # 会社のWebサイトにアクセス
-                    try:
-                        self.logger.debug(f"Attempting to access company website: {company_url}")
-                        driver.get(company_url)
-                        self.logger.debug("Successfully accessed company website")
-                        time.sleep(2)
-                    except Exception as e:
-                        self.logger.error(f"Failed to access company website: {str(e)}")
-                        return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー"]
-
-                    # ページのHTMLを取得して役員情報を抽出（LLMを使用）
-                    try:
-                        # 全ページコンテンツを取得
-                        page_content = self.extract_cleaned_content(driver, company_url)
-                        self.logger.debug(f"Page content length: {len(page_content)}")
-                        
-                        # LLMを使用して役員情報を抽出
-                        executives_json = self.query(page_content)
-                        self.logger.debug(f"LLM Response: {executives_json}")
-                        
-                        # JSON解析
-                        try:
-                            import json
-                            executives_data_json = json.loads(executives_json)
-                            if "executives" in executives_data_json and executives_data_json["executives"]:
-                                for executive in executives_data_json["executives"]:
-                                    position = executive.get("役職", "")
-                                    name = executive.get("氏名", "")
-                                    if name and name != "":
-                                        # 結果を追加
-                                        executives_data.append([company_name, company_url, position, name.strip()])
-                                        self.logger.debug(f"抽出された役員情報: {position} - {name}")
-                                
-                                if executives_data:
-                                    return executives_data  # 複数役員を返す
-                        except json.JSONDecodeError as e:
-                            self.logger.error(f"JSON解析エラー: {str(e)}")
-                        
-                        # LLMが失敗した場合、従来のメソッドを試す
-                        if not executives_data:
-                            self.logger.debug("LLM extraction failed, trying traditional methods")
-                            try:
-                                # ページのテキストを取得
-                                page_text = driver.find_element(By.TAG_NAME, "body").text
-                                # 従来の抽出ロジック
-                                # 役員情報を含む可能性のあるセクションを特定
-                                doc = self.nlp(page_text)
-                                executive_sections = []
-                                for sent in doc.sents:
-                                    if any(keyword in sent.text for keyword in ["役員", "取締役", "代表", "社長", "会長", "CEO", "取締役会長", "執行役員"]):
-                                        executive_sections.append(sent.text)
-                                        self.logger.debug(f"Found executive section: {sent.text}")
-
-                                if not executive_sections:
-                                    self.logger.warning("No executive sections found")
-                                    return [company_name, company_url, "役員情報なし", "情報なし"]
-
-                                # 最も関連性の高いセクションを選択
-                                best_section = max(executive_sections, key=lambda x: len(x))
-                                self.logger.debug(f"Selected best section: {best_section}")
-
-                                # 以下の単語は役職であり、名前ではないので除外リストに追加
-                                position_terms = [
-                                    "取締役", "監査等委員", "代表取締役", "社長", "会長", "執行役員", "CEO", 
-                                    "取締役会長", "副社長", "常務", "専務", "執行", "監査役", "支配人"
-                                ]
-                                
-                                # 役職と名前のパターンを検出
-                                positions = [
-                                    "代表取締役最高経営責任者", "代表取締役社長兼CEO", "代表取締役社長CEO", 
-                                    "代表取締役社長", "代表取締役CEO", "代表取締役", "取締役社長", 
-                                    "社長", "会長", "CEO", "取締役会長"
-                                ]
-                                
-                                # 役職+名前のパターンを特定
-                                combined_pattern = r'((' + '|'.join(positions) + r')\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10}))'
-                                combined_matches = re.findall(combined_pattern, best_section)
-                                for match in combined_matches:
-                                    full_match, position, name = match
-                                    if name and len(name) >= 2:
-                                        # 名前が単なる役職ではないことを確認
-                                        if name not in position_terms:
-                                            executives_data.append([company_name, company_url, position, name.strip()])
-                                            self.logger.debug(f"Found name with combined pattern: {name} after {position}")
-                                
-                                # 他の抽出パターン...
-                                if not executives_data:
-                                    # 日本人の名前の正規表現パターン
-                                    japanese_name_pattern = r'([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})'
-                                    
-                                    for position in positions:
-                                        if position in best_section:
-                                            text_after_position = best_section[best_section.find(position) + len(position):]
-                                            japanese_names = re.findall(japanese_name_pattern, text_after_position[:50])
-                                            if japanese_names:
-                                                name = japanese_names[0]
-                                                # 名前が単なる役職でないことを確認
-                                                if name not in position_terms:
-                                                    executives_data.append([company_name, company_url, position, name.strip()])
-                                                    self.logger.debug(f"Found Japanese name after {position}: {name}")
-                                
-                                if executives_data:
-                                    return executives_data  # 複数役員を返す
-                                else:
-                                    return [company_name, company_url, "役員名抽出失敗", "情報なし"]
-                                
-                            except Exception as e:
-                                self.logger.error(f"従来の抽出ロジックで失敗: {str(e)}")
-                                return [company_name, company_url, "役員名抽出失敗", "情報なし"]
-                        
-                    except Exception as e:
-                        self.logger.error(f"Failed to extract executive information: {str(e)}")
-                        return [company_name, "取得失敗", f"エラー: 役員情報の抽出に失敗: {str(e)}", "エラー"]
+                    self.logger.debug(f"Successfully extracted company URL: {company_url}")
                 except Exception as e:
-                    self.logger.error(f"Failed to process search results: {str(e)}")
-                    return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー"]
+                    self.logger.error(f"Failed to extract company URL: {str(e)}")
+                    return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー"]
+
+                # 会社のWebサイトにアクセス
+                try:
+                    self.logger.debug(f"Attempting to access company website: {company_url}")
+                    driver.get(company_url)
+                    self.logger.debug("Successfully accessed company website")
+                    time.sleep(5)  # Increased wait time for better page loading
+                except Exception as e:
+                    self.logger.error(f"Failed to access company website: {str(e)}")
+                    return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー"]
+
+                # ページのHTMLを取得して役員情報を抽出（LLMを使用）
+                try:
+                    # 全ページコンテンツを取得
+                    page_content = self.extract_cleaned_content(driver, company_url)
+                    self.logger.debug(f"Page content length: {len(page_content)}")
+                    
+                    # LLMを使用して役員情報を抽出
+                    executives_json = self.query(page_content)
+                    self.logger.debug(f"LLM Response: {executives_json}")
+                    
+                    # JSON解析
+                    try:
+                        import json
+                        executives_data_json = json.loads(executives_json)
+                        if "executives" in executives_data_json and executives_data_json["executives"]:
+                            for executive in executives_data_json["executives"]:
+                                position = executive.get("役職", "")
+                                name = executive.get("氏名", "")
+                                if name and name != "":
+                                    # 結果を追加
+                                    executives_data.append([company_name, company_url, position, name.strip()])
+                                    self.logger.debug(f"抽出された役員情報: {position} - {name}")
+                            
+                            if executives_data:
+                                return executives_data  # 複数役員を返す
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"JSON解析エラー: {str(e)}")
+                    
+                    # LLMが失敗した場合、従来のメソッドを試す
+                    if not executives_data:
+                        self.logger.debug("LLM extraction failed, trying traditional methods")
+                        try:
+                            # ページのテキストを取得
+                            page_text = driver.find_element(By.TAG_NAME, "body").text
+                            # 従来の抽出ロジック
+                            # 役員情報を含む可能性のあるセクションを特定
+                            doc = self.nlp(page_text)
+                            executive_sections = []
+                            for sent in doc.sents:
+                                if any(keyword in sent.text for keyword in ["役員", "取締役", "代表", "社長", "会長", "CEO", "取締役会長", "執行役員"]):
+                                    executive_sections.append(sent.text)
+                                    self.logger.debug(f"Found executive section: {sent.text}")
+
+                            if not executive_sections:
+                                self.logger.warning("No executive sections found")
+                                return [company_name, company_url, "役員情報なし", "情報なし"]
+
+                            # 最も関連性の高いセクションを選択
+                            best_section = max(executive_sections, key=lambda x: len(x))
+                            self.logger.debug(f"Selected best section: {best_section}")
+
+                            # 以下の単語は役職であり、名前ではないので除外リストに追加
+                            position_terms = [
+                                "取締役", "監査等委員", "代表取締役", "社長", "会長", "執行役員", "CEO", 
+                                "取締役会長", "副社長", "常務", "専務", "執行", "監査役", "支配人"
+                            ]
+                            
+                            # 役職と名前のパターンを検出
+                            positions = [
+                                "代表取締役最高経営責任者", "代表取締役社長兼CEO", "代表取締役社長CEO", 
+                                "代表取締役社長", "代表取締役CEO", "代表取締役", "取締役社長", 
+                                "社長", "会長", "CEO", "取締役会長", "副社長", "常務取締役", "監査役"
+                            ]
+                            
+                            # 役職+名前のパターンを特定
+                            combined_pattern = r'((' + '|'.join(positions) + r')\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10}))'
+                            combined_matches = re.findall(combined_pattern, best_section)
+                            for match in combined_matches:
+                                full_match, position, name = match
+                                if name and len(name) >= 2:
+                                    # 名前が単なる役職ではないことを確認
+                                    if name not in position_terms:
+                                        executives_data.append([company_name, company_url, position, name.strip()])
+                                        self.logger.debug(f"Found name with combined pattern: {name} after {position}")
+                            
+                            # 他の抽出パターン...
+                            if not executives_data:
+                                # 日本人の名前の正規表現パターン
+                                japanese_name_pattern = r'([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})'
+                                
+                                for position in positions:
+                                    if position in best_section:
+                                        text_after_position = best_section[best_section.find(position) + len(position):]
+                                        japanese_names = re.findall(japanese_name_pattern, text_after_position[:50])
+                                        if japanese_names:
+                                            name = japanese_names[0]
+                                            # 名前が単なる役職でないことを確認
+                                            if name not in position_terms:
+                                                executives_data.append([company_name, company_url, position, name.strip()])
+                                                self.logger.debug(f"Found Japanese name after {position}: {name}")
+                            
+                            if executives_data:
+                                return executives_data  # 複数役員を返す
+                            else:
+                                return [company_name, company_url, "役員名抽出失敗", "情報なし"]
+                            
+                        except Exception as e:
+                            self.logger.error(f"従来の抽出ロジックで失敗: {str(e)}")
+                            return [company_name, company_url, "役員名抽出失敗", "情報なし"]
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to extract executive information: {str(e)}")
+                    return [company_name, "取得失敗", f"エラー: 役員情報の抽出に失敗: {str(e)}", "エラー"]
+            except Exception as e:
+                self.logger.error(f"Failed to process search results: {str(e)}")
+                return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー"]
 
         except Exception as e:
             self.logger.error(f"Unexpected error occurred: {str(e)}")
@@ -482,25 +370,6 @@ class CompanySalesScraper:
             # BeautifulSoupを使用して構造化されたコンテンツを抽出
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
-            # 特定のURLに対する特別処理
-            if "doutor.co.jp/corporate/officer" in url:
-                # ドトール役員ページの特別処理
-                officer_sections = soup.select('section.c-section')
-                extracted_text = []
-                
-                for section in officer_sections:
-                    titles = section.select('h2, h3, h4')
-                    for title in titles:
-                        extracted_text.append(title.get_text().strip())
-                    
-                    # 役員情報のテーブルや構造化データを探す
-                    officers = section.select('div.c-section__inner')
-                    for officer in officers:
-                        officer_text = officer.get_text().strip().replace('\n\n', '\n')
-                        extracted_text.append(officer_text)
-                
-                return "\n".join(extracted_text)
-                
             # 標準的な処理：不要な要素を削除
             for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'svg']):
                 tag.decompose()
@@ -509,7 +378,7 @@ class CompanySalesScraper:
             priority_content = []
             
             # 役員情報を含む可能性の高いセクションを探す
-            officer_keywords = ['役員', '取締役', '代表', '社長', '会長', 'CEO', '執行役員', '監査役']
+            officer_keywords = ['役員', '取締役', '代表', '社長', '会長', 'CEO', '執行役員', '監査役', 'オフィサー', 'ディレクター']
             
             # 見出し要素を探す
             for heading in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
@@ -525,12 +394,23 @@ class CompanySalesScraper:
                     priority_content.append(heading_text)
                     priority_content.extend(next_elements)
             
+            # セクションを探す
+            for section in soup.find_all(['section', 'div', 'article']):
+                section_class = section.get('class', [])
+                section_id = section.get('id', '')
+                section_text = section.get_text().strip().lower()
+                
+                # クラス名、ID、またはテキスト内容に役員関連のキーワードが含まれているセクションを探す
+                if any(any(keyword in str(attr).lower() for keyword in officer_keywords) 
+                       for attr in [section_class, section_id, section_text]):
+                    priority_content.append(section.get_text().strip())
+            
             # テーブルから役員情報を抽出
             for table in soup.find_all('table'):
                 table_text = []
                 for row in table.find_all('tr'):
                     cells = [cell.get_text().strip() for cell in row.find_all(['td', 'th'])]
-                    if cells and any(keyword in ' '.join(cells) for keyword in officer_keywords):
+                    if cells and any(keyword in ' '.join(cells).lower() for keyword in officer_keywords):
                         table_text.append(' | '.join(cells))
                 
                 if table_text:
@@ -539,14 +419,32 @@ class CompanySalesScraper:
             # DLリストから役員情報を抽出
             for dl in soup.find_all('dl'):
                 dl_text = []
-                for dt, dd in zip(dl.find_all('dt'), dl.find_all('dd')):
-                    dt_text = dt.get_text().strip()
-                    dd_text = dd.get_text().strip()
-                    if any(keyword in dt_text for keyword in officer_keywords) or any(keyword in dd_text for keyword in officer_keywords):
-                        dl_text.append(f"{dt_text}: {dd_text}")
+                dts = dl.find_all('dt')
+                dds = dl.find_all('dd')
                 
-                if dl_text:
-                    priority_content.append("\n".join(dl_text))
+                if len(dts) == len(dds):  # dtとddの数が一致する場合のみ
+                    for dt, dd in zip(dts, dds):
+                        dt_text = dt.get_text().strip()
+                        dd_text = dd.get_text().strip()
+                        if any(keyword in dt_text.lower() for keyword in officer_keywords) or any(keyword in dd_text.lower() for keyword in officer_keywords):
+                            dl_text.append(f"{dt_text}: {dd_text}")
+                    
+                    if dl_text:
+                        priority_content.append("\n".join(dl_text))
+            
+            # ULリストから役員情報を抽出
+            for ul in soup.find_all('ul'):
+                ul_items = []
+                list_items = ul.find_all('li')
+                
+                # リスト内のテキストをチェック
+                list_text = ul.get_text().lower()
+                if any(keyword in list_text for keyword in officer_keywords):
+                    for li in list_items:
+                        ul_items.append(li.get_text().strip())
+                    
+                    if ul_items:
+                        priority_content.append("\n".join(ul_items))
             
             # 優先コンテンツが見つかった場合はそれを使用
             if priority_content:
@@ -561,7 +459,7 @@ class CompanySalesScraper:
             extracted_text = extracted_text.strip()
             
             # 抽出テキストの先頭に、より効果的なプロンプトのためのヒントを追加
-            prefixed_text = "以下は企業の役員情報を含むウェブページからの抽出テキストです。役職と氏名のペアを特定してください。\n\n" + extracted_text
+            prefixed_text = "以下は企業の役員情報を含むウェブページからの抽出テキストです。役職と氏名のペアを特定してください。役職には「代表取締役社長」「代表取締役会長」「取締役」「社外取締役」「監査役」などがあります。\n\n" + extracted_text
             
             return prefixed_text
             
