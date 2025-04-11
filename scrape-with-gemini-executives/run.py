@@ -52,6 +52,12 @@ class CompanySalesScraper:
         self.chrome_options.add_argument('--disable-gpu')
         self.chrome_options.add_argument('--window-size=1920,1080')
         self.chrome_options.add_argument("--disable-blink-features=AutomationControlled")  # Added to avoid detection
+        # Disable Chrome's automatic translation
+        self.chrome_options.add_argument("--disable-translate")
+        self.chrome_options.add_experimental_option('prefs', {
+            'translate_whitelists': {},
+            'translate': {'enabled': False},
+        })
         self.chrome_options.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -371,8 +377,11 @@ class CompanySalesScraper:
             # ページの読み込みを待機
             time.sleep(random.uniform(4, 8))
             
+            # ページのHTML全体を取得
+            html_content = driver.page_source
+            
             # BeautifulSoupを使用して構造化されたコンテンツを抽出
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            soup = BeautifulSoup(html_content, 'html.parser')
             
             # 標準的な処理：不要な要素を削除
             for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'svg']):
@@ -384,6 +393,22 @@ class CompanySalesScraper:
             # 役員情報を含む可能性の高いセクションを探す
             officer_keywords = ['役員', '取締役', '代表', '社長', '会長', 'CEO', '執行役員', '監査役', 'オフィサー', 'ディレクター']
             
+            # テーブルから役員情報を抽出 (テーブルを最優先)
+            for table in soup.find_all('table'):
+                # テーブルのHTMLを保存して後で処理
+                table_html = str(table)
+                table_text = []
+                for row in table.find_all('tr'):
+                    cells = [cell.get_text().strip() for cell in row.find_all(['td', 'th'])]
+                    if cells and any(keyword in ' '.join(cells).lower() for keyword in officer_keywords):
+                        table_text.append(' | '.join(cells))
+                
+                if table_text:
+                    # テーブルデータを文字列化
+                    table_data = "\n".join(table_text)
+                    # テーブルHTMLと文字列化データの両方を追加
+                    priority_content.append(f"テーブルデータ:\n{table_data}\n\nテーブルHTML:\n{table_html}")
+            
             # 見出し要素を探す
             for heading in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
                 heading_text = heading.get_text().strip()
@@ -393,10 +418,10 @@ class CompanySalesScraper:
                     for sibling in heading.find_next_siblings():
                         if sibling.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
                             break
-                        next_elements.append(sibling.get_text().strip())
+                        # HTMLを保存
+                        next_elements.append(str(sibling))
                     
-                    priority_content.append(heading_text)
-                    priority_content.extend(next_elements)
+                    priority_content.append(f"見出し: {heading_text}\n\n" + "\n".join(next_elements))
             
             # セクションを探す
             for section in soup.find_all(['section', 'div', 'article']):
@@ -407,21 +432,14 @@ class CompanySalesScraper:
                 # クラス名、ID、またはテキスト内容に役員関連のキーワードが含まれているセクションを探す
                 if any(any(keyword in str(attr).lower() for keyword in officer_keywords) 
                        for attr in [section_class, section_id, section_text]):
-                    priority_content.append(section.get_text().strip())
-            
-            # テーブルから役員情報を抽出
-            for table in soup.find_all('table'):
-                table_text = []
-                for row in table.find_all('tr'):
-                    cells = [cell.get_text().strip() for cell in row.find_all(['td', 'th'])]
-                    if cells and any(keyword in ' '.join(cells).lower() for keyword in officer_keywords):
-                        table_text.append(' | '.join(cells))
-                
-                if table_text:
-                    priority_content.append("\n".join(table_text))
+                    # セクションのHTMLと平文の両方を保存
+                    section_html = str(section)
+                    section_plain = section.get_text().strip()
+                    priority_content.append(f"セクションHTML:\n{section_html}\n\nセクション平文:\n{section_plain}")
             
             # DLリストから役員情報を抽出
             for dl in soup.find_all('dl'):
+                dl_html = str(dl)
                 dl_text = []
                 dts = dl.find_all('dt')
                 dds = dl.find_all('dd')
@@ -434,10 +452,11 @@ class CompanySalesScraper:
                             dl_text.append(f"{dt_text}: {dd_text}")
                     
                     if dl_text:
-                        priority_content.append("\n".join(dl_text))
+                        priority_content.append(f"DLデータ:\n" + "\n".join(dl_text) + f"\n\nDL HTML:\n{dl_html}")
             
             # ULリストから役員情報を抽出
             for ul in soup.find_all('ul'):
+                ul_html = str(ul)
                 ul_items = []
                 list_items = ul.find_all('li')
                 
@@ -448,7 +467,7 @@ class CompanySalesScraper:
                         ul_items.append(li.get_text().strip())
                     
                     if ul_items:
-                        priority_content.append("\n".join(ul_items))
+                        priority_content.append(f"リストアイテム:\n" + "\n".join(ul_items) + f"\n\nリストHTML:\n{ul_html}")
             
             # 優先コンテンツが見つかった場合はそれを使用
             if priority_content:
@@ -456,14 +475,15 @@ class CompanySalesScraper:
             else:
                 # 全体のテキストを取得
                 extracted_text = soup.get_text()
-                
-            # テキストの整形
-            # 余分な空白を削除
-            extracted_text = re.sub(r'\s+', ' ', extracted_text)
-            extracted_text = extracted_text.strip()
             
             # 抽出テキストの先頭に、より効果的なプロンプトのためのヒントを追加
-            prefixed_text = "以下は企業の役員情報を含むウェブページからの抽出テキストです。役職と氏名のペアを特定してください。役職には「代表取締役社長」「代表取締役会長」「取締役」「社外取締役」「監査役」などがあります。\n\n" + extracted_text
+            prefixed_text = """
+以下は企業の役員情報を含むウェブページからの抽出テキストです。役職と氏名のペアを特定してください。
+役職には「代表取締役社長」「代表取締役会長」「取締役」「社外取締役」「監査役」などがあります。
+特に注意: ウェブページにある氏名の漢字は正確にそのまま抽出してください。例えば「竹林 基哉」を「竹林 元也」に変更しないでください。
+
+本文:
+""" + extracted_text
             
             return prefixed_text
             
@@ -500,6 +520,9 @@ class CompanySalesScraper:
    - 情報が不明確な場合
    - 情報が欠落している場合
    - 情報の信頼性が低い場合
+5. 「竹林 元也」と「竹林 基哉」のような似た名前が出てきた場合は、オリジナルの表記を正確に保持すること
+6. 名前に含まれる漢字や仮名は変換や置き換えをせず、そのまま保持すること
+7. 人名が含まれる場合は、正確に抽出すること（名前をローマ字や他の方法に変更しないこと）
 
 日本語の役職の例:
 - 代表取締役社長
@@ -521,6 +544,7 @@ class CompanySalesScraper:
 - 推測や外部知識は使用しないこと
 - 文脈に明示的に記載されている情報のみを使用すること
 - できるだけ多くの役員を抽出すること
+- 人名の漢字を変更しないこと。例えば「竹林 基哉」を「竹林 元也」に変更しないこと
 """
        response = self.model.generate_content(prompt)
        return response.text
