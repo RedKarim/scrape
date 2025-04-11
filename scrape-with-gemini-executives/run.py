@@ -130,6 +130,8 @@ class CompanySalesScraper:
                             if len(company_data) > 0:
                                 # 最初の要素が役員情報のリストか確認
                                 if isinstance(company_data[0], list) and len(company_data) > 1:
+                                    # 重複した名前のチェックと削除を行う
+                                    company_data = self.remove_duplicate_executives(company_data)
                                     # 複数役員のリスト
                                     self.write_company_data(company_data)
                                 else:
@@ -151,6 +153,47 @@ class CompanySalesScraper:
             
             logging.info("スクレイピングプロセスが完了しました。")
             print(f"\nスクレイピングが完了しました。結果は {os.path.abspath(self.output_file)} に保存されています。")
+    
+    def remove_duplicate_executives(self, executives_data):
+        """
+        重複した役員名を持つデータを除去し、最初に出現したもののみを保持する
+        
+        Args:
+            executives_data (list): 役員データのリスト [会社名, URL, 役職, 氏名]
+        
+        Returns:
+            list: 重複を除去した役員データのリスト
+        """
+        self.logger.debug(f"重複チェック前の役員数: {len(executives_data)}")
+        
+        # 役員名をキーとした辞書を作成して重複を管理
+        unique_executives = {}
+        unique_data = []
+        
+        for exec_data in executives_data:
+            if len(exec_data) < 4:
+                # データが不完全な場合はスキップ
+                continue
+                
+            company_name = exec_data[0]
+            url = exec_data[1]
+            position = exec_data[2]
+            name = exec_data[3]
+            
+            # 会社内での名前の重複をチェック
+            if name not in unique_executives:
+                unique_executives[name] = True
+                unique_data.append(exec_data)
+                self.logger.debug(f"追加: {company_name} - {position} - {name}")
+            else:
+                self.logger.debug(f"重複として除外: {company_name} - {position} - {name}")
+        
+        removed_count = len(executives_data) - len(unique_data)
+        if removed_count > 0:
+            self.logger.info(f"{removed_count}件の重複役員データを除外しました")
+        
+        self.logger.debug(f"重複チェック後の役員数: {len(unique_data)}")
+        return unique_data
         
     def scrape_company_data(self, driver, company_name):
         self.logger.debug(f"Starting scrape_company_data for {company_name}")
