@@ -451,6 +451,9 @@ class CompanyRecruiterScraper:
 5. 名前に含まれる漢字や仮名は変換や置き換えをせず、そのまま保持すること
 6. メールアドレスは完全な形式で抽出すること（例: example@company.co.jp）
 7. 電話番号は日本形式で抽出すること（例: 03-1234-5678）
+   - 市外局番は必ず含めること
+   - ハイフンで区切ること
+   - 10桁または11桁の形式にすること
 8. 採用担当者名が不明な場合は空文字列("")として返す
 
 エラー処理:
@@ -464,7 +467,7 @@ class CompanyRecruiterScraper:
 - できるだけ多くの採用担当者を抽出すること
 - 人名の漢字を変更しないこと
 - メールアドレスは完全な形式で抽出すること
-- 電話番号は日本形式で抽出すること
+- 電話番号は必ず市外局番を含め、ハイフンで区切った形式で抽出すること
 """
        response = self.model.generate_content(prompt)
        return response.text
@@ -623,8 +626,8 @@ class CompanyRecruiterScraper:
         email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
         emails_in_search = re.findall(email_pattern, page_source)
         
-        # Extract phone numbers (Japanese format)
-        phone_pattern = r'(?:0\d{1,4}[-ー]?\d{1,4}[-ー]?\d{4}|\(\d{1,4}\)\d{1,4}[-ー]?\d{4})'
+        # Extract phone numbers (Japanese format) - updated pattern
+        phone_pattern = r'(?:0\d{1,4}[-ー]?\d{1,4}[-ー]?\d{4}|\(\d{1,4}\)\d{1,4}[-ー]?\d{4}|0\d{9,10}|0\d{1,4}-\d{1,4}-\d{4})'
         phones_in_search = re.findall(phone_pattern, page_source)
         
         # Clean and format phone numbers
@@ -632,12 +635,27 @@ class CompanyRecruiterScraper:
         for phone in phones_in_search:
             # Remove any non-numeric characters except hyphens
             cleaned = re.sub(r'[^\d-]', '', phone)
+            
+            # Skip if the number is too short (less than 10 digits)
+            if len(cleaned) < 10:
+                continue
+                
             # Format as 03-1234-5678 style
             if len(cleaned) == 10:
                 cleaned = f"{cleaned[:3]}-{cleaned[3:7]}-{cleaned[7:]}"
             elif len(cleaned) == 11:
                 cleaned = f"{cleaned[:3]}-{cleaned[3:7]}-{cleaned[7:]}"
+            elif len(cleaned) == 12:
+                cleaned = f"{cleaned[:4]}-{cleaned[4:8]}-{cleaned[8:]}"
+            
+            # Skip if the number doesn't look like a valid Japanese phone number
+            if not re.match(r'^0\d{1,3}-\d{1,4}-\d{4}$', cleaned):
+                continue
+                
             cleaned_phones.append(cleaned)
+        
+        # Remove duplicates while preserving order
+        cleaned_phones = list(dict.fromkeys(cleaned_phones))
         
         if emails_in_search:
             # Remove duplicates and prioritize recruitment-related emails
