@@ -24,7 +24,7 @@ class CompanySalesScraper:
 
         # ログ設定
         logging.basicConfig(
-            filename='sales_scraper.log',
+            filename='recruiter_scraper.log',
             filemode='a',
             format='%(asctime)s - %(levelname)s - %(message)s',
             level=logging.DEBUG  # Changed to DEBUG level for more detailed logging
