@@ -626,9 +626,28 @@ class CompanyRecruiterScraper:
         email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
         emails_in_search = re.findall(email_pattern, page_source)
         
-        # Extract phone numbers (Japanese format) - updated pattern
-        phone_pattern = r'(?:0\d{1,4}[-ー]?\d{1,4}[-ー]?\d{4}|\(\d{1,4}\)\d{1,4}[-ー]?\d{4}|0\d{9,10}|0\d{1,4}-\d{1,4}-\d{4})'
-        phones_in_search = re.findall(phone_pattern, page_source)
+        # Enhanced phone number patterns
+        phone_patterns = [
+            # Standard format: 03-1234-5678
+            r'0\d{1,3}-\d{1,4}-\d{4}',
+            # Without hyphens: 0312345678
+            r'0\d{9,10}',
+            # With parentheses: (03)1234-5678
+            r'\(\d{1,4}\)\d{1,4}-\d{4}',
+            # With Japanese hyphen: 03ー1234ー5678
+            r'0\d{1,3}[ー－]\d{1,4}[ー－]\d{4}',
+            # Toll-free numbers: 0120-123-456
+            r'0120-\d{3}-\d{3}',
+            # Mobile numbers: 090-1234-5678
+            r'0[789]\d-\d{4}-\d{4}',
+            # Area code with space: 03 1234 5678
+            r'0\d{1,3}\s+\d{1,4}\s+\d{4}'
+        ]
+        
+        # Find all potential phone numbers
+        phones_in_search = []
+        for pattern in phone_patterns:
+            phones_in_search.extend(re.findall(pattern, page_source))
         
         # Clean and format phone numbers
         cleaned_phones = []
@@ -641,17 +660,28 @@ class CompanyRecruiterScraper:
                 continue
                 
             # Format as 03-1234-5678 style
-            if len(cleaned) == 10:
+            if len(cleaned) == 10:  # e.g., 0312345678
                 cleaned = f"{cleaned[:3]}-{cleaned[3:7]}-{cleaned[7:]}"
-            elif len(cleaned) == 11:
+            elif len(cleaned) == 11:  # e.g., 09012345678
                 cleaned = f"{cleaned[:3]}-{cleaned[3:7]}-{cleaned[7:]}"
-            elif len(cleaned) == 12:
-                cleaned = f"{cleaned[:4]}-{cleaned[4:8]}-{cleaned[8:]}"
+            elif len(cleaned) == 12:  # e.g., 0120123456
+                cleaned = f"{cleaned[:4]}-{cleaned[4:7]}-{cleaned[7:]}"
             
-            # Skip if the number doesn't look like a valid Japanese phone number
+            # Additional validation for Japanese phone numbers
             if not re.match(r'^0\d{1,3}-\d{1,4}-\d{4}$', cleaned):
                 continue
                 
+            # Check if it's a valid area code
+            area_code = cleaned.split('-')[0]
+            if len(area_code) == 3 and not area_code.startswith(('080', '090', '070')):
+                # For 3-digit area codes, second digit should be 1-9
+                if area_code[1] not in '123456789':
+                    continue
+            elif len(area_code) == 4 and area_code.startswith('0120'):
+                # For toll-free numbers, format should be 0120-XXX-XXX
+                if not re.match(r'^0120-\d{3}-\d{3}$', cleaned):
+                    continue
+            
             cleaned_phones.append(cleaned)
         
         # Remove duplicates while preserving order
