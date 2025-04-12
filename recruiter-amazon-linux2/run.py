@@ -496,6 +496,12 @@ class CompanyRecruiterScraper:
                         skipped_rows += 1
                         continue
 
+                    # 失敗メッセージを含む行をスキップ
+                    if any(msg in [url, recruiter_name, email] for msg in ["取得失敗", "情報取得失敗", "情報なし"]):
+                        self.logger.debug(f"失敗メッセージを含む行をスキップ: {row}")
+                        skipped_rows += 1
+                        continue
+
                     # メールアドレスのクリーニング
                     if email:
                         email = email.replace('u003e', '').replace('u300c', '').replace('mailto:', '')
