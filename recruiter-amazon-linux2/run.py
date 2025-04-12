@@ -217,278 +217,78 @@ class CompanyRecruiterScraper:
         return unique_recruiters
         
     def scrape_company_data(self, driver, company_name):
+        """Scrape recruiter data for a company"""
         self.logger.debug(f"Starting scrape_company_data for {company_name}")
-        try:
-            # 検索クエリの構築
-            search_query = f"{company_name} 採用担当者メールアドレス"
-            search_url = f"https://www.google.co.jp/search?q={quote_plus(search_query)}&hl=ja"
-            self.logger.debug(f"Search URL constructed: {search_url}")
-
-            # Google検索ページにアクセス
+        self.driver = driver  # Store driver reference
+        
+        # First try to get data from company website using LLM
+        company_url = self.get_company_url(company_name)
+        if company_url:
+            self.logger.debug(f"Attempting to access company website: {company_url}")
             try:
-                self.logger.debug("Attempting to access Google search page...")
-                driver.get(search_url)
-                self.logger.debug("Successfully accessed Google search page")
-                time.sleep(5)  # Amazon Linuxでは待機時間を長めに設定
+                self.driver.get(company_url)
+                time.sleep(5)  # Wait for page to load
                 
-                # Taking screenshot for debugging
-                try:
-                    screenshot_path = f"screenshot_{company_name}.png"
-                    driver.save_screenshot(screenshot_path)
-                    self.logger.debug(f"Saved screenshot to {screenshot_path}")
-                except:
-                    self.logger.debug("Failed to save screenshot")
-
-                # Google検索結果ページから直接メールアドレスを探す
-                try:
-                    page_source = driver.page_source
-                    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-                    emails_in_search = re.findall(email_pattern, page_source)
-                    
-                    if emails_in_search:
-                        self.logger.debug(f"Found email(s) in search results: {emails_in_search}")
-                        # 重複を除去し、採用関連のメールアドレスを優先
-                        unique_emails = list(dict.fromkeys(emails_in_search))
-                        preferred_email = None
-                        for email in unique_emails:
-                            if any(keyword in email.lower() for keyword in ['recruit', 'career', 'personnel', 'hr', 'jinji', 'saiyou']):
-                                preferred_email = email
-                                break
-                        if not preferred_email and unique_emails:
-                            preferred_email = unique_emails[0]
-                            
-                        if preferred_email:
-                            # 検索結果から採用担当者名を探す
-                            recruiter_patterns = [
-                                r'採用担当[：:]\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})',
-                                r'採用責任者[：:]\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})',
-                                r'採用窓口[：:]\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})'
-                            ]
-                            
-                            recruiter_name = ""
-                            for pattern in recruiter_patterns:
-                                matches = re.findall(pattern, page_source)
-                                if matches:
-                                    recruiter_name = matches[0]
-                                    break
-                            
-                            if not recruiter_name:
-                                recruiter_name = "採用担当"
-                            
-                            # 検索結果から見つかったメールアドレスを保存
-                            recruiters_data = [[company_name, search_url, recruiter_name, preferred_email]]
-                            self.logger.debug(f"Added recruiter from search results: {recruiter_name} - {preferred_email}")
-                            
-                            # 検索結果から見つかった情報を即座に書き込む
-                            self.write_company_data(recruiters_data)
-                except Exception as e:
-                    self.logger.debug(f"Error extracting email from search results: {str(e)}")
-                    
-            except Exception as e:
-                self.logger.error(f"Failed to access Google search page: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 検索ページへのアクセスに失敗: {str(e)}", "エラー"]
-
-            # 初期化
-            company_url = None
-            if not recruiters_data:  # Only initialize if no data from search results
-                recruiters_data = []
-            
-            # 検索結果からURLを取得
-            try:
-                self.logger.debug("Attempting to find search results...")
-                # 複数のセレクタを試す
-                selectors = [
-                    "div.g",  # 従来のセレクタ
-                    "div[data-sokoban-container]",  # 新しいセレクタ
-                    "div.tF2Cxc",  # 別の新しいセレクタ
-                    "div.yuRUbf",  # 別の新しいセレクタ
-                    "#search .g",  # 別の一般的なセレクタ
-                    ".rc",  # 以前使用されていたセレクタ
-                    "div.hlcw0c",  # モバイルビュー用セレクタ
-                    "div.MjjYud",  # 新しい構造用
-                    "h3.LC20lb"  # 見出しからの検索
-                ]
+                # Take screenshot of company page
+                screenshot_path = f"screenshot_company_{company_name}.png"
+                self.driver.save_screenshot(screenshot_path)
+                self.logger.debug(f"Saved company page screenshot to {screenshot_path}")
                 
-                search_results = None
-                for selector in selectors:
-                    try:
-                        self.logger.debug(f"Trying selector: {selector}")
-                        # Amazon Linuxでは明示的待機を追加
-                        WebDriverWait(driver, 3).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                        )
-                        search_results = driver.find_elements(By.CSS_SELECTOR, selector)
-                        if search_results and len(search_results) > 0:
-                            self.logger.debug(f"Found search results using selector: {selector}")
-                            self.logger.debug(f"Number of results found: {len(search_results)}")
-                            break
-                    except Exception as e:
-                        self.logger.debug(f"Selector {selector} failed: {str(e)}")
-                        continue
-
-                if not search_results or len(search_results) == 0:
-                    self.logger.warning("No search results found with any selector")
-                    # Amazon Linuxでは会社名から直接URLを推測することで代替
-                    company_simple_name = company_name.split()[0].lower()
-                    for ja, en in {"スターバックス": "starbucks", "ファーストリテイリング": "fastretailing", "コメダ": "komeda", "はま寿司": "hamazushi"}.items():
-                        if ja in company_name:
-                            company_simple_name = en
-                            break
-                    company_url = f"https://www.{company_simple_name}.co.jp/"
-                    self.logger.debug(f"Falling back to guessed URL: {company_url}")
-                else:
-                    # 最初の検索結果のURLを取得
-                    try:
-                        self.logger.debug("Attempting to get first search result...")
-                        first_result = search_results[0]
-                        self.logger.debug("Got first search result")
-                        
-                        # 複数のリンクセレクタを試す
-                        link_selectors = ["a", "a[href]", "a[jsname='UWckNb']"]
-                        link = None
-                        for link_selector in link_selectors:
-                            try:
-                                self.logger.debug(f"Trying link selector: {link_selector}")
-                                link = first_result.find_element(By.CSS_SELECTOR, link_selector)
-                                if link:
-                                    self.logger.debug(f"Found link using selector: {link_selector}")
-                                    break
-                            except Exception as e:
-                                self.logger.debug(f"Link selector {link_selector} failed: {str(e)}")
-                                continue
-
-                        if not link:
-                            self.logger.error("No link element found in search result")
-                            # Amazon Linux用の代替手段
-                            a_elements = first_result.find_elements(By.TAG_NAME, "a")
-                            if a_elements:
-                                link = a_elements[0]
-                                self.logger.debug("Found link using alternative method (direct a tag)")
-                            else:
-                                raise Exception("リンク要素が見つかりません")
-
-                        company_url = link.get_attribute("href")
-                        if not company_url:
-                            self.logger.error("No URL found in link element")
-                            raise Exception("URLが取得できません")
-
-                        self.logger.debug(f"Successfully extracted company URL: {company_url}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to extract company URL: {str(e)}")
-                        return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー"]
-            except Exception as e:
-                self.logger.error(f"Failed to process search results: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー"]
-
-            # 会社のWebサイトにアクセス
-            try:
-                self.logger.debug(f"Attempting to access company website: {company_url}")
-                driver.get(company_url)
-                self.logger.debug("Successfully accessed company website")
-                # Amazon Linux上でより長く待機
-                time.sleep(10)  # Increased wait time for better page loading
-                
-                # スクリーンショットを撮って確認
-                try:
-                    screenshot_path = f"screenshot_company_{company_name.replace(' ', '_')}.png"
-                    driver.save_screenshot(screenshot_path)
-                    self.logger.debug(f"Saved company page screenshot to {screenshot_path}")
-                except Exception as s_ex:
-                    self.logger.debug(f"Failed to save company screenshot: {s_ex}")
-                    
-            except Exception as e:
-                self.logger.error(f"Failed to access company website: {str(e)}")
-                
-                # 直接ウェブサイトにアクセスを試みる
-                try:
-                    # 会社名からドメインを推測してアクセスを試みる
-                    self.logger.debug("Attempting alternative access methods...")
-                    
-                    # まず .co.jp を試す
-                    company_simple_name = company_name.split()[0].lower()
-                    alt_url = f"https://www.{company_simple_name}.co.jp/"
-                    self.logger.debug(f"Trying alternative URL: {alt_url}")
-                    
-                    driver.get(alt_url)
-                    self.logger.debug(f"Successfully accessed alternative URL: {alt_url}")
-                    company_url = alt_url
-                    time.sleep(10)
-                except Exception as alt_ex:
-                    self.logger.error(f"Alternative access also failed: {str(alt_ex)}")
-                    return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー"]
-
-            # ページのHTMLを取得して採用担当者情報を抽出（LLMを使用）
-            try:
-                # 全ページコンテンツを取得
-                page_content = self.extract_cleaned_content(driver, company_url)
+                # Get page content
+                page_content = self.driver.page_source
                 self.logger.debug(f"Page content length: {len(page_content)}")
                 
-                # LLMを使用して採用担当者情報を抽出
-                recruiters_json = self.query(page_content)
-                self.logger.debug(f"LLM Response: {recruiters_json}")
+                # Use LLM to extract recruiter information
+                llm_response = self.query(page_content)
+                self.logger.debug(f"LLM Response: {llm_response}")
                 
-                # JSON解析
                 try:
                     import json
-                    recruiters_data_json = json.loads(recruiters_json)
+                    recruiters_data_json = json.loads(llm_response)
                     if "recruiters" in recruiters_data_json and recruiters_data_json["recruiters"]:
-                        for recruiter in recruiters_data_json["recruiters"]:
-                            name = recruiter.get("採用担当者名", "")
-                            email = recruiter.get("メールアドレス", "")
-                            if name and name != "":
-                                # 結果を追加
-                                recruiters_data.append([company_name, company_url, name.strip(), email.strip()])
-                                self.logger.debug(f"抽出された採用担当者情報: {name} - {email}")
-                        
-                        if recruiters_data:
-                            return recruiters_data  # 複数採用担当者を返す
+                        recruiters = recruiters_data_json["recruiters"]
+                        if recruiters:
+                            self.logger.debug(f"Extracted recruiter information: {recruiters}")
+                            for recruiter in recruiters:
+                                name = recruiter.get('採用担当者名', '採用担当')
+                                email = recruiter.get('メールアドレス', '')
+                                if email:
+                                    self.write_company_data([[company_name, company_url, name, email]])
+                            return
                 except json.JSONDecodeError as e:
                     self.logger.error(f"JSON解析エラー: {str(e)}")
                 
-                # LLMが失敗した場合、従来のメソッドを試す
-                if not recruiters_data:
-                    self.logger.debug("LLM extraction failed, trying traditional methods")
-                    try:
-                        # ページのテキストを取得
-                        page_text = driver.find_element(By.TAG_NAME, "body").text
-                        
-                        # メールアドレスの正規表現パターン
-                        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-                        emails = re.findall(email_pattern, page_text)
-                        
-                        # 採用担当者名のパターン
-                        recruiter_patterns = [
-                            r'採用担当[：:]\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})',
-                            r'採用責任者[：:]\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})',
-                            r'採用窓口[：:]\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})'
-                        ]
-                        
-                        names = []
-                        for pattern in recruiter_patterns:
-                            matches = re.findall(pattern, page_text)
-                            names.extend(matches)
-                        
-                        if emails and names:
-                            # メールアドレスと名前を組み合わせる
-                            for name in names:
-                                recruiters_data.append([company_name, company_url, name.strip(), emails[0].strip()])
-                                self.logger.debug(f"Found recruiter with traditional method: {name} - {emails[0]}")
-                        
-                        if recruiters_data:
-                            return recruiters_data
-                        else:
-                            return [company_name, company_url, "採用担当者情報なし", "情報なし"]
-                            
-                    except Exception as e:
-                        self.logger.error(f"従来の抽出ロジックで失敗: {str(e)}")
-                        return [company_name, company_url, "採用担当者情報抽出失敗", "情報なし"]
+                self.logger.warning(f"LLM method failed to find recruiters for {company_name}, trying Google search as fallback")
                 
             except Exception as e:
-                self.logger.error(f"Failed to extract recruiter information: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 採用担当者情報の抽出に失敗: {str(e)}", "エラー"]
+                self.logger.error(f"Error accessing company website: {str(e)}")
+                self.logger.warning("Trying Google search as fallback")
+        
+        # If LLM method failed or no company URL found, try Google search
+        self.logger.debug("Attempting Google search as fallback")
+        search_url = self.construct_search_url(company_name)
+        self.logger.debug(f"Search URL constructed: {search_url}")
+        
+        try:
+            self.driver.get(search_url)
+            time.sleep(5)  # Wait for page to load
+            
+            # Take screenshot of search results
+            screenshot_path = f"screenshot_{company_name}.png"
+            self.driver.save_screenshot(screenshot_path)
+            self.logger.debug(f"Saved screenshot to {screenshot_path}")
+            
+            # Extract emails from search results
+            emails = self.extract_emails_from_search_results()
+            if emails:
+                self.logger.debug(f"Found email(s) in search results: {emails}")
+                for email in emails:
+                    self.write_company_data([[company_name, search_url, "採用担当", email]])
+                    self.logger.debug(f"Added recruiter from search results: 採用担当 - {email}")
+        
         except Exception as e:
-            self.logger.error(f"Unexpected error occurred: {str(e)}")
-            return [company_name, "取得失敗", f"エラー: {str(e)}", "エラー"]
+            self.logger.error(f"Error during Google search: {str(e)}")
+            self.write_company_data([[company_name, "", "情報取得失敗", "情報なし"]])
     
     def extract_cleaned_content(self, driver, url):
         """
@@ -666,7 +466,7 @@ class CompanyRecruiterScraper:
         """
         会社データをファイルに直接書き込む
         Args:
-            company_data (list): 書き込む会社データのリスト [会社名, URL, 採用担当者名, メールアドレス]
+            company_data (list): 書き込む会社データのリスト [[会社名, URL, 採用担当者名, メールアドレス], ...]
         """
         if not company_data:
             self.logger.warning("書き込むデータがありません")
@@ -711,10 +511,8 @@ class CompanyRecruiterScraper:
 
         except PermissionError as pe:
             self.logger.error(f"ファイルへのアクセス権限がありません: {str(pe)}")
-            raise
         except Exception as e:
-            self.logger.error(f"ファイル書き込み中にエラーが発生: {str(e)}")
-            raise
+            self.logger.error(f"ファイル書き込み中にエラーが発生しました: {str(e)}")
 
     def cleanup_screenshots(self):
         """スクリーンショットファイルを削除する"""
@@ -735,6 +533,92 @@ class CompanyRecruiterScraper:
             self.logger.error(f"Error during screenshot cleanup: {str(e)}")
             print(f"スクリーンショット削除中にエラーが発生しました: {str(e)}")
 
+    def get_company_url(self, company_name):
+        """Get company URL from Google search results"""
+        search_url = self.construct_search_url(company_name)
+        self.logger.debug(f"Search URL constructed: {search_url}")
+        
+        try:
+            self.driver.get(search_url)
+            time.sleep(5)  # Wait for page to load
+            
+            # Try different selectors for search results
+            selectors = [
+                "div.g",  # Traditional selector
+                "div[data-sokoban-container]",  # New selector
+                "div.tF2Cxc",  # Another new selector
+                "div.yuRUbf",  # Another new selector
+                "#search .g",  # Another common selector
+                ".rc",  # Previously used selector
+                "div.hlcw0c",  # Mobile view selector
+                "div.MjjYud",  # New structure
+                "h3.LC20lb"  # Search from headings
+            ]
+            
+            for selector in selectors:
+                try:
+                    self.logger.debug(f"Trying selector: {selector}")
+                    WebDriverWait(self.driver, 3).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    search_results = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if search_results and len(search_results) > 0:
+                        self.logger.debug(f"Found search results using selector: {selector}")
+                        first_result = search_results[0]
+                        
+                        # Try different link selectors
+                        link_selectors = ["a", "a[href]", "a[jsname='UWckNb']"]
+                        for link_selector in link_selectors:
+                            try:
+                                link = first_result.find_element(By.CSS_SELECTOR, link_selector)
+                                if link:
+                                    company_url = link.get_attribute("href")
+                                    if company_url:
+                                        self.logger.debug(f"Successfully extracted company URL: {company_url}")
+                                        return company_url
+                            except:
+                                continue
+                except:
+                    continue
+            
+            # If no URL found through search, try to guess it
+            company_simple_name = company_name.split()[0].lower()
+            for ja, en in {"スターバックス": "starbucks", "ファーストリテイリング": "fastretailing", 
+                          "コメダ": "komeda", "はま寿司": "hamazushi", "ドトール": "doutor"}.items():
+                if ja in company_name:
+                    company_simple_name = en
+                    break
+            guessed_url = f"https://www.{company_simple_name}.co.jp/"
+            self.logger.debug(f"Falling back to guessed URL: {guessed_url}")
+            return guessed_url
+            
+        except Exception as e:
+            self.logger.error(f"Error getting company URL: {str(e)}")
+            return None
+
+    def construct_search_url(self, company_name):
+        """Construct Google search URL for company"""
+        search_query = f"{company_name} 採用担当者メールアドレス"
+        return f"https://www.google.co.jp/search?q={quote_plus(search_query)}&hl=ja"
+
+    def extract_emails_from_search_results(self):
+        """Extract emails from search results page"""
+        page_source = self.driver.page_source
+        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        emails_in_search = re.findall(email_pattern, page_source)
+        
+        if emails_in_search:
+            # Remove duplicates and prioritize recruitment-related emails
+            unique_emails = list(dict.fromkeys(emails_in_search))
+            preferred_email = None
+            for email in unique_emails:
+                if any(keyword in email.lower() for keyword in ['recruit', 'career', 'personnel', 'hr', 'jinji', 'saiyou']):
+                    preferred_email = email
+                    break
+            if not preferred_email and unique_emails:
+                preferred_email = unique_emails[0]
+            return [preferred_email] if preferred_email else []
+        return []
 
 if __name__ == "__main__":
     GOOGLE_API_KEY = "AIzaSyAAZratHSyw71DkAyk_WHcUkwkXW-yksGk"
