@@ -83,7 +83,7 @@ class CompanyRecruiterScraper:
         if not os.path.exists(self.output_file):
             with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(['会社名', 'URL', '採用担当者名', 'メールアドレス'])
+                writer.writerow(['会社名', 'URL', '採用担当者名', 'メールアドレス', '電話番号'])
             print(f"アウトプットファイルを作成しました: {self.output_file}")
         
         if not os.path.exists(self.input_file):
@@ -117,7 +117,7 @@ class CompanyRecruiterScraper:
 
             with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(['会社名', 'URL', '採用担当者名', 'メールアドレス'])
+                writer.writerow(['会社名', 'URL', '採用担当者名', 'メールアドレス', '電話番号'])
             self.logger.info(f"Output file initialized: {self.output_file}")
             print(f"アウトプットファイルを初期化しました: {self.output_file}")
         except Exception as e:
@@ -169,7 +169,7 @@ class CompanyRecruiterScraper:
                                     self.write_company_data([company_data])
                         else:
                             # データが取得できなかった場合も出力に含める
-                            self.write_company_data([[company_name, "取得失敗", "情報取得失敗", "情報なし"]])
+                            self.write_company_data([[company_name, "取得失敗", "情報取得失敗", "情報なし", "情報なし"]])
                             self.logger.warning(f"{company_name}の情報が取得できませんでした")
                             
                         # ランダムな遅延（5〜10秒）
@@ -252,8 +252,9 @@ class CompanyRecruiterScraper:
                             for recruiter in recruiters:
                                 name = recruiter.get('採用担当者名', '採用担当')
                                 email = recruiter.get('メールアドレス', '')
-                                if email:
-                                    self.write_company_data([[company_name, company_url, name, email]])
+                                phone = recruiter.get('電話番号', '')
+                                if email or phone:
+                                    self.write_company_data([[company_name, company_url, name, email, phone]])
                             return
                 except json.JSONDecodeError as e:
                     self.logger.error(f"JSON解析エラー: {str(e)}")
@@ -278,17 +279,19 @@ class CompanyRecruiterScraper:
             self.driver.save_screenshot(screenshot_path)
             self.logger.debug(f"Saved screenshot to {screenshot_path}")
             
-            # Extract emails from search results
-            emails = self.extract_emails_from_search_results()
-            if emails:
+            # Extract emails and phone numbers from search results
+            emails, phones = self.extract_emails_from_search_results()
+            if emails or phones:
                 self.logger.debug(f"Found email(s) in search results: {emails}")
+                self.logger.debug(f"Found phone number(s) in search results: {phones}")
                 for email in emails:
-                    self.write_company_data([[company_name, search_url, "採用担当", email]])
-                    self.logger.debug(f"Added recruiter from search results: 採用担当 - {email}")
+                    phone = phones[0] if phones else ""
+                    self.write_company_data([[company_name, search_url, "採用担当", email, phone]])
+                    self.logger.debug(f"Added recruiter from search results: 採用担当 - {email} - {phone}")
         
         except Exception as e:
             self.logger.error(f"Error during Google search: {str(e)}")
-            self.write_company_data([[company_name, "", "情報取得失敗", "情報なし"]])
+            self.write_company_data([[company_name, "", "情報取得失敗", "情報なし", "情報なし"]])
     
     def extract_cleaned_content(self, driver, url):
         """
@@ -425,11 +428,13 @@ class CompanyRecruiterScraper:
     "recruiters": [
         {{
             "採用担当者名": "氏名",
-            "メールアドレス": "メールアドレス"
+            "メールアドレス": "メールアドレス",
+            "電話番号": "電話番号"
         }},
         {{
             "採用担当者名": "氏名2",
-            "メールアドレス": "メールアドレス2"
+            "メールアドレス": "メールアドレス2",
+            "電話番号": "電話番号2"
         }}
         // 他の採用担当者情報...
     ]
@@ -438,14 +443,18 @@ class CompanyRecruiterScraper:
 抽出ルール:
 1. 文脈に明示的に記載されている情報のみを使用すること
 2. できるだけ多くの採用担当者情報を抽出すること
-3. 採用担当者名とメールアドレスのペアを優先的に抽出すること
+3. 採用担当者名、メールアドレス、電話番号のペアを優先的に抽出すること
 4. 以下の場合は該当フィールドを空文字列("")として返す：
    - 情報が不明確な場合
    - 情報が欠落している場合
    - 情報の信頼性が低い場合
 5. 名前に含まれる漢字や仮名は変換や置き換えをせず、そのまま保持すること
 6. メールアドレスは完全な形式で抽出すること（例: example@company.co.jp）
-7. 採用担当者名が不明な場合は空文字列("")として返す
+7. 電話番号は日本形式で抽出すること（例: 03-1234-5678）
+   - 市外局番は必ず含めること
+   - ハイフンで区切ること
+   - 10桁または11桁の形式にすること
+8. 採用担当者名が不明な場合は空文字列("")として返す
 
 エラー処理:
 - 文脈が空の場合: {{"recruiters": []}}
@@ -458,6 +467,7 @@ class CompanyRecruiterScraper:
 - できるだけ多くの採用担当者を抽出すること
 - 人名の漢字を変更しないこと
 - メールアドレスは完全な形式で抽出すること
+- 電話番号は必ず市外局番を含め、ハイフンで区切った形式で抽出すること
 """
        response = self.model.generate_content(prompt)
        return response.text
@@ -466,7 +476,7 @@ class CompanyRecruiterScraper:
         """
         会社データをファイルに直接書き込む
         Args:
-            company_data (list): 書き込む会社データのリスト [[会社名, URL, 採用担当者名, メールアドレス], ...]
+            company_data (list): 書き込む会社データのリスト [[会社名, URL, 採用担当者名, メールアドレス, 電話番号], ...]
         """
         if not company_data:
             self.logger.warning("書き込むデータがありません")
@@ -479,7 +489,7 @@ class CompanyRecruiterScraper:
                 skipped_rows = 0
 
                 for row in company_data:
-                    if not isinstance(row, (list, tuple)) or len(row) != 4:
+                    if not isinstance(row, (list, tuple)) or len(row) != 5:
                         self.logger.warning(f"不正なデータ形式をスキップ: {row}")
                         skipped_rows += 1
                         continue
@@ -489,6 +499,7 @@ class CompanyRecruiterScraper:
                     url = str(row[1]).strip()
                     recruiter_name = str(row[2]).strip()
                     email = str(row[3]).strip() if row[3] else ""
+                    phone = str(row[4]).strip() if row[4] else ""
 
                     # 必須フィールドの検証
                     if not (company_name and recruiter_name):
@@ -497,7 +508,7 @@ class CompanyRecruiterScraper:
                         continue
 
                     # 失敗メッセージを含む行をスキップ
-                    if any(msg in [url, recruiter_name, email] for msg in ["取得失敗", "情報取得失敗", "情報なし"]):
+                    if any(msg in [url, recruiter_name, email, phone] for msg in ["取得失敗", "情報取得失敗", "情報なし"]):
                         self.logger.debug(f"失敗メッセージを含む行をスキップ: {row}")
                         skipped_rows += 1
                         continue
@@ -507,10 +518,10 @@ class CompanyRecruiterScraper:
                         email = email.replace('u003e', '').replace('u300c', '').replace('mailto:', '')
                         email = re.sub(r'[<>]', '', email)
 
-                    cleaned_row = [company_name, url, recruiter_name, email]
+                    cleaned_row = [company_name, url, recruiter_name, email, phone]
                     writer.writerow(cleaned_row)
                     valid_rows += 1
-                    self.logger.debug(f"書き込み完了: {company_name} - {recruiter_name} - {email}")
+                    self.logger.debug(f"書き込み完了: {company_name} - {recruiter_name} - {email} - {phone}")
 
                 self.logger.info(f"{valid_rows}件のデータを書き込みました（スキップ: {skipped_rows}件）")
                 self.logger.debug(f"ファイルの場所: {os.path.abspath(self.output_file)}")
@@ -608,10 +619,73 @@ class CompanyRecruiterScraper:
         return f"https://www.google.co.jp/search?q={quote_plus(search_query)}&hl=ja"
 
     def extract_emails_from_search_results(self):
-        """Extract emails from search results page"""
+        """Extract emails and phone numbers from search results page"""
         page_source = self.driver.page_source
+        
+        # Extract emails
         email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
         emails_in_search = re.findall(email_pattern, page_source)
+        
+        # Enhanced phone number patterns
+        phone_patterns = [
+            # Standard format: 03-1234-5678
+            r'0\d{1,3}-\d{1,4}-\d{4}',
+            # Without hyphens: 0312345678
+            r'0\d{9,10}',
+            # With parentheses: (03)1234-5678
+            r'\(\d{1,4}\)\d{1,4}-\d{4}',
+            # With Japanese hyphen: 03ー1234ー5678
+            r'0\d{1,3}[ー－]\d{1,4}[ー－]\d{4}',
+            # Toll-free numbers: 0120-123-456
+            r'0120-\d{3}-\d{3}',
+            # Mobile numbers: 090-1234-5678
+            r'0[789]\d-\d{4}-\d{4}',
+            # Area code with space: 03 1234 5678
+            r'0\d{1,3}\s+\d{1,4}\s+\d{4}'
+        ]
+        
+        # Find all potential phone numbers
+        phones_in_search = []
+        for pattern in phone_patterns:
+            phones_in_search.extend(re.findall(pattern, page_source))
+        
+        # Clean and format phone numbers
+        cleaned_phones = []
+        for phone in phones_in_search:
+            # Remove any non-numeric characters except hyphens
+            cleaned = re.sub(r'[^\d-]', '', phone)
+            
+            # Skip if the number is too short (less than 10 digits)
+            if len(cleaned) < 10:
+                continue
+                
+            # Format as 03-1234-5678 style
+            if len(cleaned) == 10:  # e.g., 0312345678
+                cleaned = f"{cleaned[:3]}-{cleaned[3:7]}-{cleaned[7:]}"
+            elif len(cleaned) == 11:  # e.g., 09012345678
+                cleaned = f"{cleaned[:3]}-{cleaned[3:7]}-{cleaned[7:]}"
+            elif len(cleaned) == 12:  # e.g., 0120123456
+                cleaned = f"{cleaned[:4]}-{cleaned[4:7]}-{cleaned[7:]}"
+            
+            # Additional validation for Japanese phone numbers
+            if not re.match(r'^0\d{1,3}-\d{1,4}-\d{4}$', cleaned):
+                continue
+                
+            # Check if it's a valid area code
+            area_code = cleaned.split('-')[0]
+            if len(area_code) == 3 and not area_code.startswith(('080', '090', '070')):
+                # For 3-digit area codes, second digit should be 1-9
+                if area_code[1] not in '123456789':
+                    continue
+            elif len(area_code) == 4 and area_code.startswith('0120'):
+                # For toll-free numbers, format should be 0120-XXX-XXX
+                if not re.match(r'^0120-\d{3}-\d{3}$', cleaned):
+                    continue
+            
+            cleaned_phones.append(cleaned)
+        
+        # Remove duplicates while preserving order
+        cleaned_phones = list(dict.fromkeys(cleaned_phones))
         
         if emails_in_search:
             # Remove duplicates and prioritize recruitment-related emails
@@ -623,8 +697,8 @@ class CompanyRecruiterScraper:
                     break
             if not preferred_email and unique_emails:
                 preferred_email = unique_emails[0]
-            return [preferred_email] if preferred_email else []
-        return []
+            return [preferred_email] if preferred_email else [], cleaned_phones
+        return [], cleaned_phones
 
 if __name__ == "__main__":
     GOOGLE_API_KEY = "AIzaSyAAZratHSyw71DkAyk_WHcUkwkXW-yksGk"
