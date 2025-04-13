@@ -684,11 +684,11 @@ class CompanyRecruiterScraper:
             
             cleaned_phones.append(cleaned)
         
-        # Remove duplicates while preserving order
+        # Remove duplicate while preserving order
         cleaned_phones = list(dict.fromkeys(cleaned_phones))
         
         if emails_in_search:
-            # Remove duplicates and prioritize recruitment-related emails
+            # Remove duplicate and prioritize recruitment-related emails
             unique_emails = list(dict.fromkeys(emails_in_search))
             preferred_email = None
             for email in unique_emails:
