@@ -20,7 +20,7 @@ from typing import List
 class CompanySalesScraper:
     def __init__(self, api_key: str):
         self.input_file = './data/input.csv'
-        self.output_file = './data/output_トリドール.csv'
+        self.output_file = './data/output_executive.csv'
 
         # ログ設定
         logging.basicConfig(
