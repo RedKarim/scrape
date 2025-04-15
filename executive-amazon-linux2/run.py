@@ -216,7 +216,13 @@ class CompanySalesScraper:
     def scrape_company_data(self, driver, company_name):
         self.logger.debug(f"Starting scrape_company_data for {company_name}")
         try:
-            # 検索クエリの構築
+            # First, find the official website URL
+            official_url = self.find_official_website(driver, company_name)
+            if not official_url:
+                self.logger.warning(f"Could not find official website for {company_name}")
+                official_url = ""
+
+            # Search for executive information
             search_query = f"{company_name} 役員"
             search_url = f"https://www.google.co.jp/search?q={quote_plus(search_query)}&hl=ja"
             self.logger.debug(f"Search URL constructed: {search_url}")
@@ -238,10 +244,9 @@ class CompanySalesScraper:
                     
             except Exception as e:
                 self.logger.error(f"Failed to access Google search page: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 検索ページへのアクセスに失敗: {str(e)}", "エラー", "不明"]
+                return [company_name, "取得失敗", f"エラー: 検索ページへのアクセスに失敗: {str(e)}", "エラー", "不明", official_url]
 
             # 初期化
-            company_url = None
             executives_data = []
             
             # 検索結果からURLを取得
@@ -326,10 +331,10 @@ class CompanySalesScraper:
                         self.logger.debug(f"Successfully extracted company URL: {company_url}")
                     except Exception as e:
                         self.logger.error(f"Failed to extract company URL: {str(e)}")
-                        return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー", "不明"]
+                        return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー", "不明", official_url]
             except Exception as e:
                 self.logger.error(f"Failed to process search results: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー", "不明"]
+                return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー", "不明", official_url]
 
             # 会社のWebサイトにアクセス
             try:
@@ -366,7 +371,7 @@ class CompanySalesScraper:
                     time.sleep(10)
                 except Exception as alt_ex:
                     self.logger.error(f"Alternative access also failed: {str(alt_ex)}")
-                    return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー", "不明"]
+                    return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー", "不明", official_url]
 
             # ページのHTMLを取得して役員情報を抽出（LLMを使用）
             try:
@@ -392,7 +397,7 @@ class CompanySalesScraper:
                             name = executive.get("氏名", "")
                             if name and name != "":
                                 # 結果を追加（業種情報を含める）
-                                executives_data.append([company_name, company_url, position, name, company_url, industry])
+                                executives_data.append([company_name, company_url, position, name, company_url, industry, official_url])
                                 self.logger.debug(f"抽出された役員情報: {position} - {name}")
                         
                         if executives_data:
@@ -417,7 +422,7 @@ class CompanySalesScraper:
 
                         if not executive_sections:
                             self.logger.warning("No executive sections found")
-                            return [company_name, company_url, "役員情報なし", "情報なし", "不明"]
+                            return [company_name, company_url, "役員情報なし", "情報なし", "不明", official_url]
 
                         # 最も関連性の高いセクションを選択
                         best_section = max(executive_sections, key=lambda x: len(x))
@@ -444,7 +449,7 @@ class CompanySalesScraper:
                             if name and len(name) >= 2:
                                 # 名前が単なる役職ではないことを確認
                                 if name not in position_terms:
-                                    executives_data.append([company_name, company_url, position, name.strip(), company_url, industry])
+                                    executives_data.append([company_name, company_url, position, name.strip(), company_url, industry, official_url])
                                     self.logger.debug(f"Found name with combined pattern: {name} after {position}")
                         
                         # 他の抽出パターン...
@@ -460,24 +465,24 @@ class CompanySalesScraper:
                                         name = japanese_names[0]
                                         # 名前が単なる役職でないことを確認
                                         if name not in position_terms:
-                                            executives_data.append([company_name, company_url, position, name.strip(), company_url, industry])
+                                            executives_data.append([company_name, company_url, position, name.strip(), company_url, industry, official_url])
                                             self.logger.debug(f"Found Japanese name after {position}: {name}")
                         
                         if executives_data:
                             return executives_data  # 複数役員を返す
                         else:
-                            return [company_name, company_url, "役員名抽出失敗", "情報なし", "不明"]
+                            return [company_name, company_url, "役員名抽出失敗", "情報なし", "不明", official_url]
                         
                     except Exception as e:
                         self.logger.error(f"従来の抽出ロジックで失敗: {str(e)}")
-                        return [company_name, company_url, "役員名抽出失敗", "情報なし", "不明"]
+                        return [company_name, company_url, "役員名抽出失敗", "情報なし", "不明", official_url]
                 
             except Exception as e:
                 self.logger.error(f"Failed to extract executive information: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 役員情報の抽出に失敗: {str(e)}", "エラー", "不明"]
+                return [company_name, "取得失敗", f"エラー: 役員情報の抽出に失敗: {str(e)}", "エラー", "不明", official_url]
         except Exception as e:
             self.logger.error(f"Unexpected error occurred: {str(e)}")
-            return [company_name, "取得失敗", f"エラー: {str(e)}", "エラー", "不明"]
+            return [company_name, "取得失敗", f"エラー: {str(e)}", "エラー", "不明", official_url]
     
     def extract_cleaned_content(self, driver, url):
         """
@@ -685,29 +690,19 @@ class CompanySalesScraper:
 
     def write_company_data(self, company_data):
         """
-        会社データをファイルに直接書き込む
+        Write company data to the output file
         Args:
-            company_data (list): 書き込む会社データのリスト
+            company_data (list): List of company data rows
         """
         try:
-            with open(self.output_file, 'a', newline='', encoding='utf-8') as f_out:
-                writer = csv.writer(f_out)
-                # Write header if file is empty
-                if os.path.getsize(self.output_file) == 0:
-                    writer.writerow(['会社名', 'URL', '役職', '氏名', '業種', '公式サイトURL'])
-                
+            with open(self.output_file, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
                 for row in company_data:
-                    if len(row) == 6:  # 正しい列数かチェック
-                        # Clean the URL and get base domain for official site
-                        clean_url = self.clean_url(row[1])
-                        # Format: company_name, URL, position, name, industry, official_site_url
-                        writer.writerow([row[0], row[1], row[2], row[3], row[5], clean_url])
-                        self.logger.debug(f"書き込み完了: {row[0]} - {row[2]} - {row[3]} - {row[5]} - {clean_url}")
-                self.logger.info(f"{len(company_data)}件のデータを書き込みました")
-                self.logger.debug(f"ファイルの場所: {os.path.abspath(self.output_file)}")
+                    if len(row) == 7:  # Check if row has correct number of columns
+                        writer.writerow(row)
+                        self.logger.debug(f"Wrote data for {row[0]}")
         except Exception as e:
-            self.logger.error(f"ファイル書き込み中にエラーが発生: {str(e)}")
-            print(f"ファイル書き込みエラー: {str(e)}")
+            self.logger.error(f"Error writing company data: {str(e)}")
 
     def cleanup_screenshots(self):
         """スクリーンショットファイルを削除する"""
@@ -776,6 +771,94 @@ class CompanySalesScraper:
         except Exception as e:
             self.logger.error(f"業種抽出に失敗: {str(e)}")
             return "不明"
+
+    def find_official_website(self, driver, company_name: str) -> str:
+        """
+        Search for the company's official website URL using Google search
+        Args:
+            driver: Selenium WebDriver instance
+            company_name (str): Company name to search for
+        Returns:
+            str: Official website URL or empty string if not found
+        """
+        try:
+            # Construct search query for official website
+            search_query = f"{company_name} 公式サイト"
+            search_url = f"https://www.google.co.jp/search?q={quote_plus(search_query)}&hl=ja"
+            self.logger.debug(f"Searching for official website: {search_url}")
+
+            # Access Google search page
+            driver.get(search_url)
+            time.sleep(5)  # Wait for page load
+
+            # Try multiple selectors for search results
+            selectors = [
+                "div.g",  # Traditional selector
+                "div[data-sokoban-container]",  # New selector
+                "div.tF2Cxc",  # Another new selector
+                "div.yuRUbf",  # Another new selector
+                "#search .g",  # Another common selector
+                ".rc",  # Previously used selector
+                "div.hlcw0c",  # Mobile view selector
+                "div.MjjYud",  # New structure
+                "h3.LC20lb"  # Heading search
+            ]
+
+            # Find search results
+            search_results = None
+            for selector in selectors:
+                try:
+                    WebDriverWait(driver, 3).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    search_results = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if search_results and len(search_results) > 0:
+                        break
+                except Exception as e:
+                    self.logger.debug(f"Selector {selector} failed: {str(e)}")
+                    continue
+
+            if not search_results or len(search_results) == 0:
+                self.logger.warning("No search results found for official website")
+                return ""
+
+            # Get the first result's URL
+            try:
+                first_result = search_results[0]
+                link_selectors = ["a", "a[href]", "a[jsname='UWckNb']"]
+                link = None
+                for link_selector in link_selectors:
+                    try:
+                        link = first_result.find_element(By.CSS_SELECTOR, link_selector)
+                        if link:
+                            break
+                    except Exception as e:
+                        self.logger.debug(f"Link selector {link_selector} failed: {str(e)}")
+                        continue
+
+                if not link:
+                    a_elements = first_result.find_elements(By.TAG_NAME, "a")
+                    if a_elements:
+                        link = a_elements[0]
+                    else:
+                        return ""
+
+                official_url = link.get_attribute("href")
+                if not official_url:
+                    return ""
+
+                # Clean the URL
+                clean_url = self.clean_url(official_url)
+                self.logger.debug(f"Found official website URL: {clean_url}")
+                return clean_url
+
+            except Exception as e:
+                self.logger.error(f"Failed to extract official website URL: {str(e)}")
+                return ""
+
+        except Exception as e:
+            self.logger.error(f"Error finding official website: {str(e)}")
+            return ""
 
 
 if __name__ == "__main__":
