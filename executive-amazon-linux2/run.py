@@ -3,7 +3,7 @@ import time
 import random
 import os
 import glob
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse, urlunparse
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -20,7 +20,7 @@ from typing import List
 class CompanySalesScraper:
     def __init__(self, api_key: str):
         self.input_file = './data/input.csv'
-        self.output_file = './data/output_トリドール.csv'
+        self.output_file = './data/output_executive.csv'
 
         # ログ設定
         logging.basicConfig(
@@ -658,6 +658,27 @@ class CompanySalesScraper:
        response = self.model.generate_content(prompt)
        return response.text
     
+    def clean_url(self, url: str) -> str:
+        """
+        Clean up URL by removing tracking parameters and getting the base domain
+        Args:
+            url (str): The URL to clean
+        Returns:
+            str: Cleaned URL
+        """
+        try:
+            parsed = urlparse(url)
+            # Remove query parameters
+            clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
+            # If it's a specific page, get the base domain
+            if len(clean_url.split('/')) > 4:
+                base_domain = '/'.join(clean_url.split('/')[:3])
+                return base_domain
+            return clean_url
+        except Exception as e:
+            self.logger.error(f"URL cleaning failed: {str(e)}")
+            return url
+
     def write_company_data(self, company_data):
         """
         会社データをファイルに直接書き込む
@@ -669,7 +690,10 @@ class CompanySalesScraper:
                 writer = csv.writer(f_out)
                 for row in company_data:
                     if len(row) == 4:  # 正しい列数かチェック
-                        writer.writerow(row)
+                        # Clean the URL and get base domain for official site
+                        clean_url = self.clean_url(row[1])
+                        # Add the cleaned official URL as the last column
+                        writer.writerow(row + [clean_url])
                         self.logger.debug(f"書き込み完了: {row[0]} - {row[2]} - {row[3]}")
                 self.logger.info(f"{len(company_data)}件のデータを書き込みました")
                 self.logger.debug(f"ファイルの場所: {os.path.abspath(self.output_file)}")
