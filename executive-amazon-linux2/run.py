@@ -77,7 +77,7 @@ class CompanySalesScraper:
         if not os.path.exists(self.output_file):
             with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(['会社名', 'URL', '役職', '氏名'])
+                writer.writerow(['会社名', 'URL', '役職', '氏名', '業種', '公式サイトURL'])
             print(f"アウトプットファイルを作成しました: {self.output_file}")
         
         if not os.path.exists(self.input_file):
@@ -105,7 +105,7 @@ class CompanySalesScraper:
         try:
             with open(self.output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(['会社名', 'URL', '役職', '氏名'])
+                writer.writerow(['会社名', 'URL', '役職', '氏名', '業種', '公式サイトURL'])
             self.logger.info(f"Output file initialized: {self.output_file}")
             print(f"アウトプットファイルを初期化しました: {self.output_file}")
         except Exception as e:
@@ -157,7 +157,7 @@ class CompanySalesScraper:
                                     self.write_company_data([company_data])
                         else:
                             # データが取得できなかった場合も出力に含める
-                            self.write_company_data([[company_name, "取得失敗", "情報取得失敗", "情報なし"]])
+                            self.write_company_data([[company_name, "取得失敗", "情報取得失敗", "情報なし", "不明"]])
                             self.logger.warning(f"{company_name}の情報が取得できませんでした")
                             
                         # ランダムな遅延（5〜10秒）
@@ -238,7 +238,7 @@ class CompanySalesScraper:
                     
             except Exception as e:
                 self.logger.error(f"Failed to access Google search page: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 検索ページへのアクセスに失敗: {str(e)}", "エラー"]
+                return [company_name, "取得失敗", f"エラー: 検索ページへのアクセスに失敗: {str(e)}", "エラー", "不明"]
 
             # 初期化
             company_url = None
@@ -326,10 +326,10 @@ class CompanySalesScraper:
                         self.logger.debug(f"Successfully extracted company URL: {company_url}")
                     except Exception as e:
                         self.logger.error(f"Failed to extract company URL: {str(e)}")
-                        return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー"]
+                        return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー", "不明"]
             except Exception as e:
                 self.logger.error(f"Failed to process search results: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー"]
+                return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー", "不明"]
 
             # 会社のWebサイトにアクセス
             try:
@@ -366,13 +366,17 @@ class CompanySalesScraper:
                     time.sleep(10)
                 except Exception as alt_ex:
                     self.logger.error(f"Alternative access also failed: {str(alt_ex)}")
-                    return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー"]
+                    return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー", "不明"]
 
             # ページのHTMLを取得して役員情報を抽出（LLMを使用）
             try:
                 # 全ページコンテンツを取得
                 page_content = self.extract_cleaned_content(driver, company_url)
                 self.logger.debug(f"Page content length: {len(page_content)}")
+                
+                # 業種情報を抽出
+                industry = self.extract_industry_info(page_content)
+                self.logger.debug(f"抽出された業種: {industry}")
                 
                 # LLMを使用して役員情報を抽出
                 executives_json = self.query(page_content)
@@ -387,8 +391,8 @@ class CompanySalesScraper:
                             position = executive.get("役職", "")
                             name = executive.get("氏名", "")
                             if name and name != "":
-                                # 結果を追加
-                                executives_data.append([company_name, company_url, position, name.strip()])
+                                # 結果を追加（業種情報を含める）
+                                executives_data.append([company_name, company_url, position, name, company_url, industry])
                                 self.logger.debug(f"抽出された役員情報: {position} - {name}")
                         
                         if executives_data:
@@ -413,7 +417,7 @@ class CompanySalesScraper:
 
                         if not executive_sections:
                             self.logger.warning("No executive sections found")
-                            return [company_name, company_url, "役員情報なし", "情報なし"]
+                            return [company_name, company_url, "役員情報なし", "情報なし", "不明"]
 
                         # 最も関連性の高いセクションを選択
                         best_section = max(executive_sections, key=lambda x: len(x))
@@ -440,7 +444,7 @@ class CompanySalesScraper:
                             if name and len(name) >= 2:
                                 # 名前が単なる役職ではないことを確認
                                 if name not in position_terms:
-                                    executives_data.append([company_name, company_url, position, name.strip()])
+                                    executives_data.append([company_name, company_url, position, name.strip(), company_url, industry])
                                     self.logger.debug(f"Found name with combined pattern: {name} after {position}")
                         
                         # 他の抽出パターン...
@@ -456,24 +460,24 @@ class CompanySalesScraper:
                                         name = japanese_names[0]
                                         # 名前が単なる役職でないことを確認
                                         if name not in position_terms:
-                                            executives_data.append([company_name, company_url, position, name.strip()])
+                                            executives_data.append([company_name, company_url, position, name.strip(), company_url, industry])
                                             self.logger.debug(f"Found Japanese name after {position}: {name}")
                         
                         if executives_data:
                             return executives_data  # 複数役員を返す
                         else:
-                            return [company_name, company_url, "役員名抽出失敗", "情報なし"]
+                            return [company_name, company_url, "役員名抽出失敗", "情報なし", "不明"]
                         
                     except Exception as e:
                         self.logger.error(f"従来の抽出ロジックで失敗: {str(e)}")
-                        return [company_name, company_url, "役員名抽出失敗", "情報なし"]
+                        return [company_name, company_url, "役員名抽出失敗", "情報なし", "不明"]
                 
             except Exception as e:
                 self.logger.error(f"Failed to extract executive information: {str(e)}")
-                return [company_name, "取得失敗", f"エラー: 役員情報の抽出に失敗: {str(e)}", "エラー"]
+                return [company_name, "取得失敗", f"エラー: 役員情報の抽出に失敗: {str(e)}", "エラー", "不明"]
         except Exception as e:
             self.logger.error(f"Unexpected error occurred: {str(e)}")
-            return [company_name, "取得失敗", f"エラー: {str(e)}", "エラー"]
+            return [company_name, "取得失敗", f"エラー: {str(e)}", "エラー", "不明"]
     
     def extract_cleaned_content(self, driver, url):
         """
@@ -688,13 +692,17 @@ class CompanySalesScraper:
         try:
             with open(self.output_file, 'a', newline='', encoding='utf-8') as f_out:
                 writer = csv.writer(f_out)
+                # Write header if file is empty
+                if os.path.getsize(self.output_file) == 0:
+                    writer.writerow(['会社名', 'URL', '役職', '氏名', '業種', '公式サイトURL'])
+                
                 for row in company_data:
-                    if len(row) == 4:  # 正しい列数かチェック
+                    if len(row) == 6:  # 正しい列数かチェック
                         # Clean the URL and get base domain for official site
                         clean_url = self.clean_url(row[1])
-                        # Add the cleaned official URL as the last column
-                        writer.writerow(row + [clean_url])
-                        self.logger.debug(f"書き込み完了: {row[0]} - {row[2]} - {row[3]}")
+                        # Format: company_name, URL, position, name, industry, official_site_url
+                        writer.writerow([row[0], row[1], row[2], row[3], row[5], clean_url])
+                        self.logger.debug(f"書き込み完了: {row[0]} - {row[2]} - {row[3]} - {row[5]} - {clean_url}")
                 self.logger.info(f"{len(company_data)}件のデータを書き込みました")
                 self.logger.debug(f"ファイルの場所: {os.path.abspath(self.output_file)}")
         except Exception as e:
@@ -719,6 +727,44 @@ class CompanySalesScraper:
         except Exception as e:
             self.logger.error(f"Error during screenshot cleanup: {str(e)}")
             print(f"スクリーンショット削除中にエラーが発生しました: {str(e)}")
+
+    def extract_industry_info(self, page_content: str) -> str:
+        """
+        Extract industry information from the page content using LLM
+        Args:
+            page_content (str): The page content to analyze
+        Returns:
+            str: The industry type
+        """
+        prompt = f"""
+以下の文脈から企業の業種を特定してください。業種は以下のような形式で返してください：
+- 小売業
+- 製造業
+- サービス業
+- 情報通信業
+など
+
+文脈:
+{page_content}
+
+出力形式:
+{{
+    "industry": "業種名"
+}}
+
+注意事項:
+1. 文脈に明示的に記載されている情報のみを使用すること
+2. 業種は一般的な分類を使用すること
+3. 不明な場合は「不明」と返すこと
+"""
+        try:
+            response = self.model.generate_content(prompt)
+            import json
+            result = json.loads(response.text)
+            return result.get("industry", "不明")
+        except Exception as e:
+            self.logger.error(f"業種抽出に失敗: {str(e)}")
+            return "不明"
 
 
 if __name__ == "__main__":
