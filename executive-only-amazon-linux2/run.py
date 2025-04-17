@@ -654,14 +654,33 @@ class CompanySalesScraper:
             return url
 
     def write_company_data(self, data):
+        """
+        Write company data to the output file
+        Args:
+            data (list): List of company data rows or a single row
+        """
         try:
             with open(self.output_file, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                if isinstance(data[0], list):  # Multiple executives
-                    for row in data:
-                        writer.writerow(row)
-                else:  # Single row
-                    writer.writerow(data)
+                if isinstance(data, list):
+                    if data and isinstance(data[0], list):  # Multiple executives
+                        for row in data:
+                            if isinstance(row, list):
+                                writer.writerow(row)
+                            else:
+                                # Handle case where row is a string representation of a list
+                                try:
+                                    import ast
+                                    if isinstance(row, str) and row.startswith('['):
+                                        row = ast.literal_eval(row)
+                                    writer.writerow(row)
+                                except:
+                                    self.logger.error(f"Failed to parse row: {row}")
+                    else:  # Single row
+                        if isinstance(data, list):
+                            writer.writerow(data)
+                        else:
+                            self.logger.error(f"Invalid data format: {data}")
         except Exception as e:
             self.logger.error(f"Error writing to CSV: {str(e)}")
 
