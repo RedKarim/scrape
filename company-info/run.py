@@ -814,6 +814,50 @@ class CompanySalesScraper:
             self.logger.error(f"Error extracting annual sales: {str(e)}")
             return ""
 
+    def start_scraping(self):
+        """
+        Start the scraping process by reading from input file and processing each company
+        """
+        try:
+            # Initialize Chrome driver
+            driver = webdriver.Chrome(options=self.chrome_options)
+            self.logger.info("Chrome driver initialized successfully")
+
+            # Read input file
+            with open(self.input_file, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader)  # Skip header row
+                for row in reader:
+                    if not row:  # Skip empty rows
+                        continue
+                    company_name = row[0].strip()
+                    if not company_name:  # Skip empty company names
+                        continue
+
+                    self.logger.info(f"Processing company: {company_name}")
+                    
+                    try:
+                        # Scrape company data
+                        company_data = self.scrape_company_data(driver, company_name)
+                        
+                        # Write the data to output file
+                        self.write_company_data(company_data)
+                        
+                        # Add a small delay between requests
+                        time.sleep(random.uniform(2, 5))
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error processing company {company_name}: {str(e)}")
+                        continue
+
+            # Clean up
+            driver.quit()
+            self.cleanup_screenshots()
+            self.logger.info("Scraping completed successfully")
+
+        except Exception as e:
+            self.logger.error(f"Error in start_scraping: {str(e)}")
+            raise
 
 if __name__ == "__main__":
     GOOGLE_API_KEY = "AIzaSyAAZratHSyw71DkAyk_WHcUkwkXW-yksGk"
