@@ -20,7 +20,7 @@ from typing import List
 class CompanySalesScraper:
     def __init__(self, api_key: str):
         self.input_file = './data/input.csv'
-        self.output_file = './data/output_company_info.csv'
+        self.output_file = './data/output_executive.csv'
 
         # ログ設定
         logging.basicConfig(
@@ -112,218 +112,279 @@ class CompanySalesScraper:
             self.logger.error(f"Failed to initialize output file: {str(e)}")
             print(f"アウトプットファイル初期化エラー: {str(e)}")
     
-    def start_scraping(self):
-        try:
-            print(f"出力ファイル: {os.path.abspath(self.output_file)}")
-            print("スクレイピングを開始します...")
-            
-            # Cleanup any previous Chrome user data directories
-            try:
-                import subprocess
-                subprocess.run("rm -rf /tmp/chrome-data-*", shell=True)
-                self.logger.debug("Cleaned up previous Chrome user data directories")
-            except Exception as cleanup_e:
-                self.logger.debug(f"Failed to clean up Chrome data dirs: {cleanup_e}")
-            
-            with webdriver.Chrome(options=self.chrome_options) as driver, \
-                 open(self.input_file, 'r', encoding='utf-8') as f_in:
-                # Set page load timeout
-                driver.set_page_load_timeout(30)
-                driver.implicitly_wait(10)
-
-                reader = csv.reader(f_in)
-                header = next(reader, None)  # ヘッダーをスキップ
-                print("インプットファイルのヘッダーをスキップしました。")
-
-                for row in reader:
-                    if row:
-                        company_name = row[0].strip()
-                        print(f"\n会社名: {company_name} のスクレイピングを開始します。")
-                        
-                        # scrape_company_dataがリスト（単一役員）または役員のリストのリスト（複数役員）を返す可能性がある
-                        company_data = self.scrape_company_data(driver, company_name)
-                        
-                        # company_dataがリストのリストである場合（複数役員）
-                        if company_data and isinstance(company_data, list):
-                            if len(company_data) > 0:
-                                # 最初の要素が役員情報のリストか確認
-                                if isinstance(company_data[0], list) and len(company_data) > 1:
-                                    # 重複した名前のチェックと削除を行う
-                                    company_data = self.remove_duplicate_executives(company_data)
-                                    # 複数役員のリスト
-                                    self.write_company_data(company_data)
-                                else:
-                                    # 単一役員
-                                    self.write_company_data([company_data])
-                        else:
-                            # データが取得できなかった場合も出力に含める
-                            self.write_company_data([[company_name, "取得失敗", "情報取得失敗", "情報なし", "不明", "情報なし", "情報なし"]])
-                            self.logger.warning(f"{company_name}の情報が取得できませんでした")
-                            
-                        # ランダムな遅延（5〜10秒）
-                        time.sleep(random.uniform(4, 8))
-        except Exception as e:
-            logging.critical(f"スクレイピングが予期せず終了しました: {str(e)}")
-            print(f"エラーが発生しました: {str(e)}")
-        finally:
-            # スクリーンショットファイルを削除
-            self.cleanup_screenshots()
-            
-            logging.info("スクレイピングプロセスが完了しました。")
-            print(f"\nスクレイピングが完了しました。結果は {os.path.abspath(self.output_file)} に保存されています。")
-    
-    def remove_duplicate_executives(self, executives_data):
-        """
-        重複した役員名を持つデータを除去し、最初に出現したもののみを保持する
-        
-        Args:
-            executives_data (list): 役員データのリスト [会社名, URL, 役職, 氏名]
-        
-        Returns:
-            list: 重複を除去した役員データのリスト
-        """
-        self.logger.debug(f"重複チェック前の役員数: {len(executives_data)}")
-        
-        # 役員名をキーとした辞書を作成して重複を管理
-        unique_executives = {}
-        unique_data = []
-        
-        for exec_data in executives_data:
-            if len(exec_data) < 4:
-                # データが不完全な場合はスキップ
-                continue
-                
-            company_name = exec_data[0]
-            url = exec_data[1]
-            position = exec_data[2]
-            name = exec_data[3]
-            
-            # 会社内での名前の重複をチェック
-            if name not in unique_executives:
-                unique_executives[name] = True
-                unique_data.append(exec_data)
-                self.logger.debug(f"追加: {company_name} - {position} - {name}")
-            else:
-                self.logger.debug(f"重複として除外: {company_name} - {position} - {name}")
-        
-        removed_count = len(executives_data) - len(unique_data)
-        if removed_count > 0:
-            self.logger.info(f"{removed_count}件の重複役員データを除外しました")
-        
-        self.logger.debug(f"重複チェック後の役員数: {len(unique_data)}")
-        return unique_data
         
     def scrape_company_data(self, driver, company_name):
-        """
-        会社のデータをスクレイピングする
-        Args:
-            driver: Selenium WebDriver
-            company_name (str): 会社名
-        Returns:
-            list: [会社名, 業種, 公式サイトURL, 年商]
-        """
         self.logger.debug(f"Starting scrape_company_data for {company_name}")
         try:
-            # 業種の検索と抽出
-            industry = self.search_and_extract_industry(driver, company_name)
-            industry = self.clean_text(industry)
-            
-            # 公式サイトURLの取得
+            # First, find the official website URL
             official_url = self.find_official_website(driver, company_name)
-            official_url = self.clean_text(official_url)
-            
-            # 年商の検索と抽出
-            annual_sales = self.search_and_extract_annual_sales(driver, company_name)
-            annual_sales = self.clean_text(annual_sales)
-            
-            # 会社名のクリーンアップ
-            company_name = self.clean_text(company_name)
-            
-            # データを返す
-            return [[company_name, industry, official_url, annual_sales]]
-            
-        except Exception as e:
-            self.logger.error(f"Error in scrape_company_data: {str(e)}")
-            return [[company_name, "", "", ""]]
+            if not official_url:
+                self.logger.warning(f"Could not find official website for {company_name}")
+                official_url = ""
 
-    def search_and_extract_industry(self, driver, company_name):
-        """
-        会社の業種を検索して抽出する
-        """
-        try:
-            search_query = f"{company_name} 業種"
+            # Extract annual sales information
+            annual_sales = self.extract_annual_sales(driver, company_name)
+            self.logger.debug(f"Annual sales for {company_name}: {annual_sales}")
+
+            # Search for executive information
+            search_query = f"{company_name} 役員一覧 OR 役員紹介 OR 経営陣 -pdf"  # Exclude PDFs from initial search
             search_url = f"https://www.google.co.jp/search?q={quote_plus(search_query)}&hl=ja"
-            self.logger.debug(f"Searching for industry: {search_url}")
-            
-            driver.get(search_url)
-            time.sleep(5)  # ページの読み込みを待つ
-            
-            # 検索結果ページのテキストを取得
-            page_text = driver.find_element(By.TAG_NAME, "body").text
-            
-            # LLMを使用して業種を抽出
-            prompt = f"""
-以下のGoogle検索結果から、{company_name}の業種を抽出してください。
-業種は以下のような形式で表現されることが多いです：
-- "○○業" "○○製造" "○○サービス"などの形式
-- "主な事業" "主要な事業"などの説明の後に続く説明
+            self.logger.debug(f"Search URL constructed: {search_url}")
 
-検索結果:
-{page_text}
+            # Google検索ページにアクセス
+            try:
+                self.logger.debug("Attempting to access Google search page...")
+                driver.get(search_url)
+                self.logger.debug("Successfully accessed Google search page")
+                time.sleep(5)  # Amazon Linuxでは待機時間を長めに設定
+                
+                # Taking screenshot for debugging
+                try:
+                    screenshot_path = f"screenshot_{company_name}.png"
+                    driver.save_screenshot(screenshot_path)
+                    self.logger.debug(f"Saved screenshot to {screenshot_path}")
+                except:
+                    self.logger.debug("Failed to save screenshot")
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to access Google search page: {str(e)}")
+                return [company_name, "取得失敗", f"エラー: 検索ページへのアクセスに失敗: {str(e)}", "エラー", "不明", official_url, annual_sales]
 
-回答は業種のみを1行で返してください。
-業種が不明な場合は空文字列を返してください。
-"""
-            response = self.model.generate_content(prompt)
-            industry = response.text.strip()
+            # 初期化
+            executives_data = []
             
-            # 余分な文字を削除
-            industry = industry.strip('[]\'"{}')
-            return industry
-            
+            # 検索結果からURLを取得
+            try:
+                self.logger.debug("Attempting to find search results...")
+                # 複数のセレクタを試す
+                selectors = [
+                    "div.g",  # 従来のセレクタ
+                    "div[data-sokoban-container]",  # 新しいセレクタ
+                    "div.tF2Cxc",  # 別の新しいセレクタ
+                    "div.yuRUbf",  # 別の新しいセレクタ
+                    "#search .g",  # 別の一般的なセレクタ
+                    ".rc",  # 以前使用されていたセレクタ
+                    "div.hlcw0c",  # モバイルビュー用セレクタ
+                    "div.MjjYud",  # 新しい構造用
+                    "h3.LC20lb"  # 見出しからの検索
+                ]
+                
+                search_results = None
+                for selector in selectors:
+                    try:
+                        self.logger.debug(f"Trying selector: {selector}")
+                        # Amazon Linuxでは明示的待機を追加
+                        WebDriverWait(driver, 3).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                        search_results = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if search_results and len(search_results) > 0:
+                            self.logger.debug(f"Found search results using selector: {selector}")
+                            self.logger.debug(f"Number of results found: {len(search_results)}")
+                            break
+                    except Exception as e:
+                        self.logger.debug(f"Selector {selector} failed: {str(e)}")
+                        continue
+
+                if not search_results or len(search_results) == 0:
+                    # Try alternative search with PDF included
+                    search_query_with_pdf = f"{company_name} 役員一覧 OR 役員紹介 OR 経営陣 filetype:pdf"
+                    search_url_with_pdf = f"https://www.google.co.jp/search?q={quote_plus(search_query_with_pdf)}&hl=ja"
+                    
+                    self.logger.debug(f"Trying PDF search: {search_url_with_pdf}")
+                    driver.get(search_url_with_pdf)
+                    time.sleep(5)
+                    
+                    for selector in selectors:
+                        try:
+                            WebDriverWait(driver, 3).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                            )
+                            search_results = driver.find_elements(By.CSS_SELECTOR, selector)
+                            if search_results and len(search_results) > 0:
+                                self.logger.debug(f"Found PDF results using selector: {selector}")
+                                break
+                        except Exception as e:
+                            continue
+
+                if not search_results or len(search_results) == 0:
+                    self.logger.warning("No search results found with any selector")
+                    # Try direct website navigation
+                    if official_url:
+                        company_url = official_url
+                        self.logger.debug(f"Using official URL: {company_url}")
+                    else:
+                        # Fallback to company name-based URL
+                        company_simple_name = company_name.split()[0].lower()
+                        for ja, en in {"スターバックス": "starbucks", "ファーストリテイリング": "fastretailing", 
+                                     "コメダ": "komeda", "はま寿司": "hamazushi"}.items():
+                            if ja in company_name:
+                                company_simple_name = en
+                                break
+                        company_url = f"https://www.{company_simple_name}.co.jp/"
+                        self.logger.debug(f"Falling back to guessed URL: {company_url}")
+                else:
+                    # Get URL from search results
+                    try:
+                        self.logger.debug("Attempting to get first search result...")
+                        first_result = search_results[0]
+                        self.logger.debug("Got first search result")
+                        
+                        link_selectors = ["a", "a[href]", "a[jsname='UWckNb']"]
+                        link = None
+                        for link_selector in link_selectors:
+                            try:
+                                self.logger.debug(f"Trying link selector: {link_selector}")
+                                link = first_result.find_element(By.CSS_SELECTOR, link_selector)
+                                if link:
+                                    self.logger.debug(f"Found link using selector: {link_selector}")
+                                    break
+                            except Exception as e:
+                                self.logger.debug(f"Link selector {link_selector} failed: {str(e)}")
+                                continue
+
+                        if not link:
+                            self.logger.error("No link element found in search result")
+                            a_elements = first_result.find_elements(By.TAG_NAME, "a")
+                            if a_elements:
+                                link = a_elements[0]
+                                self.logger.debug("Found link using alternative method (direct a tag)")
+                            else:
+                                raise Exception("リンク要素が見つかりません")
+
+                        company_url = link.get_attribute("href")
+                        if not company_url:
+                            self.logger.error("No URL found in link element")
+                            raise Exception("URLが取得できません")
+
+                        self.logger.debug(f"Successfully extracted company URL: {company_url}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to extract company URL: {str(e)}")
+                        return [company_name, "取得失敗", f"エラー: URLの取得に失敗: {str(e)}", "エラー", "不明", official_url, annual_sales]
+            except Exception as e:
+                self.logger.error(f"Failed to process search results: {str(e)}")
+                return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー", "不明", official_url, annual_sales]
+
+            # Access the company website
+            try:
+                self.logger.debug(f"Attempting to access company website: {company_url}")
+                driver.get(company_url)
+                self.logger.debug("Successfully accessed company website")
+                time.sleep(10)
+                
+                # Take screenshot for debugging
+                try:
+                    screenshot_path = f"screenshot_company_{company_name.replace(' ', '_')}.png"
+                    driver.save_screenshot(screenshot_path)
+                    self.logger.debug(f"Saved company page screenshot to {screenshot_path}")
+                except Exception as s_ex:
+                    self.logger.debug(f"Failed to save company screenshot: {s_ex}")
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to access company website: {str(e)}")
+                # Try alternative URLs if the main one fails
+                try:
+                    if official_url and official_url != company_url:
+                        self.logger.debug(f"Trying official URL: {official_url}")
+                        driver.get(official_url)
+                        company_url = official_url
+                        time.sleep(10)
+                except Exception as alt_ex:
+                    self.logger.error(f"Alternative access also failed: {str(alt_ex)}")
+                    return [company_name, "取得失敗", f"エラー: 会社のWebサイトへのアクセスに失敗: {str(e)}", "エラー", "不明", official_url, annual_sales]
+
+            # Extract page content and executive information
+            try:
+                page_content = self.extract_cleaned_content(driver, company_url)
+                self.logger.debug(f"Page content length: {len(page_content)}")
+                
+                # Extract industry information
+                industry = self.extract_industry_info(page_content)
+                self.logger.debug(f"抽出された業種: {industry}")
+                
+                # Try to extract executive information using LLM
+                executives_json = self.query(page_content)
+                self.logger.debug(f"LLM Response: {executives_json}")
+                
+                try:
+                    import json
+                    executives_data_json = json.loads(executives_json)
+                    if "executives" in executives_data_json and executives_data_json["executives"]:
+                        for executive in executives_data_json["executives"]:
+                            position = executive.get("役職", "")
+                            name = executive.get("氏名", "")
+                            if name and name != "":
+                                executives_data.append([company_name, company_url, position, name, industry, official_url, annual_sales])
+                                self.logger.debug(f"抽出された役員情報: {position} - {name}")
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"JSON解析エラー: {str(e)}")
+                
+                # If LLM extraction failed, try traditional methods
+                if not executives_data:
+                    self.logger.debug("LLM extraction failed, trying traditional methods")
+                    try:
+                        page_text = driver.find_element(By.TAG_NAME, "body").text
+                        doc = self.nlp(page_text)
+                        executive_sections = []
+                        
+                        # Look for sections containing executive information
+                        for sent in doc.sents:
+                            if any(keyword in sent.text for keyword in ["役員", "取締役", "代表", "社長", "会長", "CEO", "取締役会長", "執行役員"]):
+                                executive_sections.append(sent.text)
+                                self.logger.debug(f"Found executive section: {sent.text}")
+
+                        if executive_sections:
+                            best_section = max(executive_sections, key=lambda x: len(x))
+                            self.logger.debug(f"Selected best section: {best_section}")
+
+                            position_terms = [
+                                "取締役", "監査等委員", "代表取締役", "社長", "会長", "執行役員", "CEO", 
+                                "取締役会長", "副社長", "常務", "専務", "執行", "監査役", "支配人"
+                            ]
+                            
+                            positions = [
+                                "代表取締役最高経営責任者", "代表取締役社長兼CEO", "代表取締役社長CEO", 
+                                "代表取締役社長", "代表取締役CEO", "代表取締役", "取締役社長", 
+                                "社長", "会長", "CEO", "取締役会長", "副社長", "常務取締役", "監査役"
+                            ]
+                            
+                            # Extract executive information using patterns
+                            combined_pattern = r'((' + '|'.join(positions) + r')\s*([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10}))'
+                            combined_matches = re.findall(combined_pattern, best_section)
+                            
+                            for match in combined_matches:
+                                full_match, position, name = match
+                                if name and len(name) >= 2 and name not in position_terms:
+                                    executives_data.append([company_name, company_url, position, name.strip(), industry, official_url, annual_sales])
+                                    self.logger.debug(f"Found name with combined pattern: {name} after {position}")
+                            
+                            # If no matches found, try alternative pattern
+                            if not executives_data:
+                                japanese_name_pattern = r'([一-龯ぁ-んァ-ヶー]{1,10}\s*[一-龯ぁ-んァ-ヶー]{1,10})'
+                                for position in positions:
+                                    if position in best_section:
+                                        text_after_position = best_section[best_section.find(position) + len(position):]
+                                        japanese_names = re.findall(japanese_name_pattern, text_after_position[:50])
+                                        if japanese_names:
+                                            name = japanese_names[0]
+                                            if name not in position_terms:
+                                                executives_data.append([company_name, company_url, position, name.strip(), industry, official_url, annual_sales])
+                                                self.logger.debug(f"Found Japanese name after {position}: {name}")
+
+                    except Exception as e:
+                        self.logger.error(f"Traditional extraction failed: {str(e)}")
+
+                if executives_data:
+                    return executives_data
+                else:
+                    return [company_name, company_url, "役員情報なし", "情報なし", industry, official_url, annual_sales]
+                
+            except Exception as e:
+                self.logger.error(f"Failed to extract executive information: {str(e)}")
+                return [company_name, "取得失敗", f"エラー: 役員情報の抽出に失敗: {str(e)}", "エラー", "不明", official_url, annual_sales]
         except Exception as e:
-            self.logger.error(f"Error extracting industry: {str(e)}")
-            return ""
-
-    def search_and_extract_annual_sales(self, driver, company_name):
-        """
-        会社の年商を検索して抽出する
-        """
-        try:
-            search_query = f"{company_name} 年商"
-            search_url = f"https://www.google.co.jp/search?q={quote_plus(search_query)}&hl=ja"
-            self.logger.debug(f"Searching for annual sales: {search_url}")
-            
-            driver.get(search_url)
-            time.sleep(5)  # ページの読み込みを待つ
-            
-            # 検索結果ページのテキストを取得
-            page_text = driver.find_element(By.TAG_NAME, "body").text
-            
-            # LLMを使用して年商を抽出
-            prompt = f"""
-以下のGoogle検索結果から、{company_name}の年商を抽出してください。
-年商は以下のような形式で表現されることが多いです：
-- "売上高" "年商" "年間売上高"などの後に続く数値
-- "○○億円" "○○万円"などの形式
-- "連結売上高" "単体売上高"などの区別がある場合は連結を優先
-
-検索結果:
-{page_text}
-
-回答は数値のみを返してください（例："5,000億円" "100億円"）
-年商が不明な場合は空文字列を返してください。
-"""
-            response = self.model.generate_content(prompt)
-            annual_sales = response.text.strip()
-            
-            # 余分な文字を削除
-            annual_sales = annual_sales.strip('[]\'"{}')
-            return annual_sales
-            
-        except Exception as e:
-            self.logger.error(f"Error extracting annual sales: {str(e)}")
-            return ""
+            self.logger.error(f"Failed to process search results: {str(e)}")
+            return [company_name, "取得失敗", f"エラー: 検索結果の処理に失敗: {str(e)}", "エラー", "不明", official_url, annual_sales]
     
     def extract_cleaned_content(self, driver, url):
         """
@@ -346,24 +407,20 @@ class CompanySalesScraper:
             for tag in soup(['script', 'style', 'meta', 'link', 'noscript', 'svg']):
                 tag.decompose()
                 
-            # 企業情報が含まれる可能性の高いセクションに優先度を置く
+            # 役員情報が含まれる可能性の高いセクションに優先度を置く
             priority_content = []
             
-            # 企業情報を含む可能性の高いキーワード
-            company_keywords = [
-                '企業概要', '会社概要', '事業内容', '業種', '業態',
-                '売上高', '年商', '年間売上', '連結売上', '事業領域',
-                '主な事業', '主要な事業', '事業分野'
-            ]
+            # 役員情報を含む可能性の高いセクションを探す
+            officer_keywords = ['役員', '取締役', '代表', '社長', '会長', 'CEO', '執行役員', '監査役', 'オフィサー', 'ディレクター']
             
-            # テーブルから企業情報を抽出 (テーブルを最優先)
+            # テーブルから役員情報を抽出 (テーブルを最優先)
             for table in soup.find_all('table'):
                 # テーブルのHTMLを保存して後で処理
                 table_html = str(table)
                 table_text = []
                 for row in table.find_all('tr'):
                     cells = [cell.get_text().strip() for cell in row.find_all(['td', 'th'])]
-                    if cells and any(keyword in ' '.join(cells).lower() for keyword in company_keywords):
+                    if cells and any(keyword in ' '.join(cells).lower() for keyword in officer_keywords):
                         table_text.append(' | '.join(cells))
                 
                 if table_text:
@@ -375,7 +432,7 @@ class CompanySalesScraper:
             # 見出し要素を探す
             for heading in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
                 heading_text = heading.get_text().strip()
-                if any(keyword in heading_text for keyword in company_keywords):
+                if any(keyword in heading_text for keyword in officer_keywords):
                     # 見出しとその直後のコンテンツを抽出
                     next_elements = []
                     for sibling in heading.find_next_siblings():
@@ -392,15 +449,15 @@ class CompanySalesScraper:
                 section_id = section.get('id', '')
                 section_text = section.get_text().strip().lower()
                 
-                # クラス名、ID、またはテキスト内容に企業情報関連のキーワードが含まれているセクションを探す
-                if any(any(keyword in str(attr).lower() for keyword in company_keywords) 
+                # クラス名、ID、またはテキスト内容に役員関連のキーワードが含まれているセクションを探す
+                if any(any(keyword in str(attr).lower() for keyword in officer_keywords) 
                        for attr in [section_class, section_id, section_text]):
                     # セクションのHTMLと平文の両方を保存
                     section_html = str(section)
                     section_plain = section.get_text().strip()
                     priority_content.append(f"セクションHTML:\n{section_html}\n\nセクション平文:\n{section_plain}")
             
-            # DLリストから企業情報を抽出
+            # DLリストから役員情報を抽出
             for dl in soup.find_all('dl'):
                 dl_html = str(dl)
                 dl_text = []
@@ -411,13 +468,13 @@ class CompanySalesScraper:
                     for dt, dd in zip(dts, dds):
                         dt_text = dt.get_text().strip()
                         dd_text = dd.get_text().strip()
-                        if any(keyword in dt_text.lower() for keyword in company_keywords) or any(keyword in dd_text.lower() for keyword in company_keywords):
+                        if any(keyword in dt_text.lower() for keyword in officer_keywords) or any(keyword in dd_text.lower() for keyword in officer_keywords):
                             dl_text.append(f"{dt_text}: {dd_text}")
                     
                     if dl_text:
                         priority_content.append(f"DLデータ:\n" + "\n".join(dl_text) + f"\n\nDL HTML:\n{dl_html}")
             
-            # ULリストから企業情報を抽出
+            # ULリストから役員情報を抽出
             for ul in soup.find_all('ul'):
                 ul_html = str(ul)
                 ul_items = []
@@ -425,7 +482,7 @@ class CompanySalesScraper:
                 
                 # リスト内のテキストをチェック
                 list_text = ul.get_text().lower()
-                if any(keyword in list_text for keyword in company_keywords):
+                if any(keyword in list_text for keyword in officer_keywords):
                     for li in list_items:
                         ul_items.append(li.get_text().strip())
                     
@@ -441,12 +498,9 @@ class CompanySalesScraper:
             
             # 抽出テキストの先頭に、より効果的なプロンプトのためのヒントを追加
             prefixed_text = """
-以下は企業の基本情報を含むウェブページからの抽出テキストです。
-以下の情報を特定してください：
-1. 業種・事業内容
-2. 売上高・年商情報
-
-特に注意: 数値や業種の表記は正確にそのまま抽出してください。
+以下は企業の役員情報を含むウェブページからの抽出テキストです。役職と氏名のペアを特定してください。
+役職には「代表取締役社長」「代表取締役会長」「取締役」「社外取締役」「監査役」などがあります。
+特に注意: ウェブページにある氏名の漢字は正確にそのまま抽出してください。例えば「竹林 基哉」を「竹林 元也」に変更しないでください。
 
 本文:
 """ + extracted_text
@@ -456,85 +510,6 @@ class CompanySalesScraper:
         except Exception as e:
             return f"Error occurred: {str(e)}"
     
-    def query(self, text: str) -> str:
-       prompt = f"""
-与えられた文脈から役員情報をできるだけ多く抽出してJSON形式で返してください。
-
-文脈:
-{text}
-
-出力形式:
-{{
-    "executives": [
-        {{
-            "役職": "役職名",
-            "氏名": "氏名"
-        }},
-        {{
-            "役職": "役職名2",
-            "氏名": "氏名2"
-        }}
-        // 他の役員情報...
-    ]
-}}
-
-抽出ルール:
-1. 文脈に明示的に記載されている情報のみを使用すること
-2. できるだけ多くの役員情報を抽出すること
-3. 代表取締役社長、CEO、取締役、監査役などの役職と氏名のペアを優先的に抽出すること
-4. 以下の場合は該当フィールドを空文字列("")として返す：
-   - 情報が不明確な場合
-   - 情報が欠落している場合
-   - 情報の信頼性が低い場合
-5. "竹林 元也"と"竹林 基哉"のような似た名前が出てきた場合は、オリジナルの表記を正確に保持すること
-6. 名前に含まれる漢字や仮名は変換や置き換えをせず、そのまま保持すること
-7. 人名が含まれる場合は、正確に抽出すること（名前をローマ字や他の方法に変更しないこと）
-
-日本語の役職の例:
-- 代表取締役社長
-- 代表取締役会長
-- 取締役
-- 常務取締役
-- 専務取締役
-- 社外取締役
-- 監査役
-- 社外監査役
-- 執行役員
-
-エラー処理:
-- 文脈が空の場合: {{"executives": []}}
-- 役員情報が見つからない場合: {{"executives": []}}
-- 不正なフォーマットの場合: {{"error": "Invalid format in source text"}}
-
-注意事項:
-- 推測や外部知識は使用しないこと
-- 文脈に明示的に記載されている情報のみを使用すること
-- できるだけ多くの役員を抽出すること
-- 人名の漢字を変更しないこと。例えば"竹林 基哉"を"竹林 元也"に変更しないこと
-"""
-       response = self.model.generate_content(prompt)
-       return response.text
-    
-    def clean_url(self, url: str) -> str:
-        """
-        Clean up URL by removing tracking parameters and getting the base domain
-        Args:
-            url (str): The URL to clean
-        Returns:
-            str: Cleaned URL
-        """
-        try:
-            parsed = urlparse(url)
-            # Remove query parameters
-            clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
-            # If it's a specific page, get the base domain
-            if len(clean_url.split('/')) > 4:
-                base_domain = '/'.join(clean_url.split('/')[:3])
-                return base_domain
-            return clean_url
-        except Exception as e:
-            self.logger.error(f"URL cleaning failed: {str(e)}")
-            return url
 
     def write_company_data(self, company_data):
         """
@@ -546,19 +521,9 @@ class CompanySalesScraper:
             with open(self.output_file, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 for row in company_data:
-                    if len(row) >= 4:
-                        # Clean up the data
-                        company_name = self.clean_text(row[0])
-                        industry = self.clean_text(row[1])
-                        website = self.clean_text(row[2])
-                        sales = self.clean_text(row[3])
-                        
-                        # Write the cleaned data
-                        cleaned_row = [company_name, industry, website, sales]
-                        writer.writerow(cleaned_row)
-                        self.logger.debug(f"Wrote data for {company_name}: {cleaned_row}")
-                    else:
-                        self.logger.warning(f"Skipping row with insufficient data: {row}")
+                    if len(row) == 7:  # Check if row has correct number of columns
+                        writer.writerow(row)
+                        self.logger.debug(f"Wrote data for {row[0]}")
         except Exception as e:
             self.logger.error(f"Error writing company data: {str(e)}")
 
@@ -709,8 +674,7 @@ class CompanySalesScraper:
                 ".rc",  # Previously used selector
                 "div.hlcw0c",  # Mobile view selector
                 "div.MjjYud",  # New structure
-                "h3.LC20lb",  # Heading search
-                "a[href]"  # Direct link search
+                "h3.LC20lb"  # Heading search
             ]
 
             # Find search results
@@ -734,19 +698,23 @@ class CompanySalesScraper:
             # Get the first result's URL
             try:
                 first_result = search_results[0]
+                link_selectors = ["a", "a[href]", "a[jsname='UWckNb']"]
                 link = None
-                
-                # Try to find a link element
-                try:
-                    link = first_result.find_element(By.TAG_NAME, "a")
-                except:
-                    # If no direct link found, try to find any link in the result
-                    links = first_result.find_elements(By.TAG_NAME, "a")
-                    if links:
-                        link = links[0]
+                for link_selector in link_selectors:
+                    try:
+                        link = first_result.find_element(By.CSS_SELECTOR, link_selector)
+                        if link:
+                            break
+                    except Exception as e:
+                        self.logger.debug(f"Link selector {link_selector} failed: {str(e)}")
+                        continue
 
                 if not link:
-                    return ""
+                    a_elements = first_result.find_elements(By.TAG_NAME, "a")
+                    if a_elements:
+                        link = a_elements[0]
+                    else:
+                        return ""
 
                 official_url = link.get_attribute("href")
                 if not official_url:
@@ -846,16 +814,6 @@ class CompanySalesScraper:
             self.logger.error(f"Error extracting annual sales: {str(e)}")
             return ""
 
-    def clean_text(self, text: str) -> str:
-        """Clean text by removing prefixes and formatting"""
-        text = text.replace('"', '').replace("'", "").replace("{", "").replace("}", "").strip()
-        prefixes = ['業種:', 'industry:', 'revenue:', '年商:', 'year_sales:', 'annual_revenue:']
-        for prefix in prefixes:
-            if text.startswith(prefix):
-                text = text.replace(prefix, '').strip()
-        if text.startswith('[') and text.endswith(']'):
-            text = text[1:-1].strip()
-        return text
 
 if __name__ == "__main__":
     GOOGLE_API_KEY = "AIzaSyAAZratHSyw71DkAyk_WHcUkwkXW-yksGk"
